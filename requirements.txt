@@ -1,0 +1,3 @@
+Biopython
+requests
+matplotlib
