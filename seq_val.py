@@ -1,3 +1,6 @@
+__author__ = "Arne Scheu"
+__date__ = "2018-05-20"
+
 import csv
 import datetime
 import os
@@ -9,17 +12,19 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from matplotlib.lines import Line2D
 
+# https://github.com/Cadair/jupyter_environment_kernels/issues/10
+try:
+    FileNotFoundError
+except NameError:
+    # py2
+    FileNotFoundError = IOError
+    print("Defined FileNotFoundError as IOError. Are you running python2?")
 
 def master():
     # Defining which files to handle from task.txt file
     task_list = define_task(os.path.join(wd, "task.txt"))
 
     for task in task_list:
-        # Defining gene of interest based on genbank and region or sequence field.
-        # Returns a dictionary with sequence, start, end (+1 to array index)
-        region = define_goi(task)
-        goi, start, end = region["goi"], region["start"], region["end"]  # TODO: Make less ugly return
-
         # define the sequence traces belonging to gb file
         ab1_list = []
         for key in task:
@@ -35,11 +40,17 @@ def master():
                 if ".ab1" in files:
                     ab1_list.append(files)
 
+        # Defining gene of interest based on genbank and region or sequence field.
+        # Returns a dictionary with sequence, start, end (+1 to array index)
+        region = define_goi(task)
+        task["goi"], task["start"], task["end"] = region["goi"], region["start"], region[
+            "end"]  # TODO: Make less ugly return
+
         # For each sequence trace, creating corresponding alignment in nblast
         # Then creates image of traces at mismatch positions
         alignment_list = []
         for ab1_path in ab1_list:
-            if local_nblast(goi, ab1_path) != 0:
+            if local_nblast(task["goi"], ab1_path) != 0:
                 continue
             alignment = interpret_blast()
             ab1 = SeqIO.read(ab1_path, 'abi')
@@ -48,14 +59,14 @@ def master():
 
         # Create expasy, removing first residue ([3:]
         with  open(os.path.join(wd, "seq_align", "temp", "nomet_expasy.html"), "w+") as ex:
-            ex.write(expasy(goi[3:].translate(to_stop=True)).decode("utf-8"))
+            ex.write(expasy(task["goi"][3:].translate(to_stop=True)).decode("utf-8"))
 
         # Compiles all previous data
         task["user"] = username
         if "record" in region:
-            html_love(task, region["goi"], alignment_list, region["record"])
+            html_love(task, alignment_list, region["record"])
         else:
-            html_love(task, region["goi"], alignment_list)
+            html_love(task, alignment_list)
 
 
 def define_task(taskfile):
@@ -73,22 +84,26 @@ def define_goi(task):  # not bothering with -1 strand
         try:
             record = SeqIO.read(task["genbank"], "genbank")
             for feature in record.features:
-                if "GOI" in feature.qualifiers["label"]:  # define label name by genebank file?
+                if "GOI" in feature.qualifiers["label"]:  # define label name by genbank file?
                     start, end = int(feature.location.start), int(feature.location.end)
                     return {"record": record, "goi": record.seq[start - 1:end - 1], "start": start, "end": end}
-            if not task["region"] is None:  # define sequence from region
+            if not task["region"] is "":  # define sequence from region
                 start = int(task["region"].split(":")[0])
                 end = int(task["region"].split(":")[1])
                 return {"record": record, "goi": record.seq[start - 1:end - 1], "start": start, "end": end}
             elif not task["sequence"] is None:  # define region from sequence
-                goi = task["sequence"]
-                start = int(record.seq.find(goi)) - 1
-                return {"record": record, "goi": goi, "start": start, "end": start + len(goi)}
+                goi = Seq(task["sequence"])
+                start = int(str(record.seq.find(str(goi).upper())))
+                print("Start-1", start)
+                if start == -1:
+                    print("Start not found")  # TODO check that defined region is correct
+                    return False
+                return {"record": record, "goi": goi, "start": start + 1, "end": start + len(goi)}
             else:
                 print("GOI not defined by region/sequence/annotation. Default to genbank region")
                 return {"record": record, "goi": str(record.seq), "start": 1, "end": len(record.seq)}
         except FileNotFoundError:
-            print(task["genebank"] + " not found.")
+            print(task["genbank"] + " not found.")
             if not task["sequence"] is None:
                 return {"goi": task["sequence"], "start": 1, "end": len(task["sequence"])}
             else:
@@ -143,11 +158,14 @@ def interpret_blast(
         subject = {"query": "", "sequence": "", "misalign": []}
         subject["tiny_blast"] = ""
         subject["seq_range"] = [False, False]
+        subject["que_end"] = False
         for line in raw_blast:
             space += 1
             if "Query_1" in line:
                 start, space = True, 0
-                subject["query"] = subject["query"] + list(filter(None, line.strip("\n").split(" ")))[2]
+                linesplit = list(filter(None, line.strip("\n").split(" ")))
+                subject["query"] = subject["query"] + linesplit[2]
+                subject["que_end"] = int(linesplit[3])
             if start:
                 if space == 1:
                     linesplit = list(filter(None, line.strip("\n").split(" ")))
@@ -223,6 +241,45 @@ def handle_alignment(ab1, alignment):
     """
 
     offset = 0
+    name_offset = 0
+    if alignment["seq_range"][0] < alignment["seq_range"][1]:
+        alignment["orientation"] = 1
+        misalign = alignment["misalign"]
+    else:
+        alignment["orientation"] = -1  # I need to parse through the guide in inverse manner...
+        # guide=guide[::-1]
+        misalign = alignment["misalign"]  # [::-1]
+        print(misalign)
+        # misalign=alignment["misalign"]
+        # print(misalign)
+
+    # TODO make font size bigger
+
+    for position, char in enumerate(guide):
+        if position in misalign:
+            traces.append(chromatogram(position, offset, ab1, alignment, name_offset))
+
+        if char == ".":
+            pass
+        elif char == "+":  # THIS MUST NOT CREATE AN OFFSET AS BLAST DOES NOT INCREMENT QUERY NR
+            pass
+        elif char == "-":
+            offset = offset - 1
+            print(alignment["misalign"], char, position, offset)
+
+    """
+    for relative_misalign in misalign:
+            traces.append(chromatogram(relative_misalign, offset, ab1, alignment))
+            print(relative_misalign,"guide",len(guide)) #TODO T7R this should trigger at 14, but doesn't
+            if guide[relative_misalign] == ".":
+                pass
+            elif guide[relative_misalign] == "+":
+                offset = offset + 1 #TODO should only one value create an offset?
+            elif guide[relative_misalign] == "-":
+                offset = offset - 1
+    """
+    """
+    offset = 0
     for relative_misalign in alignment["misalign"]:
         if alignment["seq_range"][0] < alignment["seq_range"][1]:
             alignment["orientation"] = 1
@@ -242,16 +299,20 @@ def handle_alignment(ab1, alignment):
             elif guide[relative_misalign] == "-":
                 offset = offset - 1
             traces.append(chromatogram(relative_misalign, offset, ab1, alignment))
+    """
     return traces
 
 
-def chromatogram(relative_misalign, offset, ab1, alignment):
+def chromatogram(relative_misalign, offset, ab1, alignment, name_offset):
     if alignment["orientation"] == 1:
-        rel = relative_misalign + offset - 1
-        absolute_position = alignment["seq_range"][0] + rel
+        rel = relative_misalign + offset
+        absolute_position = alignment["seq_range"][0] + rel - 1
+        misnr = relative_misalign + 1  # TODO WHY DO I NEED SHIFT HERE?
     else:
-        rel = -relative_misalign - offset
-        absolute_position = alignment["seq_range"][0] + rel
+        rel = relative_misalign + offset  # + or - offset?
+        absolute_position = alignment["seq_range"][0] - rel - 1
+        misnr = relative_misalign  # TODO WHAT IS THIS ACTUALLY? DON'T REALLY KNOW ANYMORE
+        print(absolute_position, alignment["seq_range"])
 
     readposition = ab1.annotations["abif_raw"]["PLOC1"][absolute_position]
 
@@ -284,50 +345,120 @@ def chromatogram(relative_misalign, offset, ab1, alignment):
     except IndexError:
         print("Index end of chromatogram, defaulting to maximum")
         xmax = len(ab1.annotations["abif_raw"]["DATA9"])
-    plt.xlim(xmin, xmax)
-    plt.axvline(x=readposition)
-    plt.ylim(0, ymax)
 
-    ax1 = plt.gca()
-    ax1.set_xlabel('Chromatogram')
+
     ax = plt.subplot()
 
-    plt.title("Misaligned " + alignment["query"][relative_misalign] + str(relative_misalign) + alignment["sequence"][
-        relative_misalign] + ", ab1 " + str(
-            readposition) + " offset " + str(offset))  # ,  y=1.125)
+    # plt.title("Misaligned " + alignment["query"][relative_misalign] + str(misnr) + alignment["sequence"][
+    #    relative_misalign] + ", ab1" + str(
+    #        readposition)  + " offset " + str(offset),  y=1.2)
+
+    plt.title(alignment["query"][relative_misalign] + str(misnr) + alignment["sequence"][relative_misalign], y=1.15)
     # plt.title(alignment["query"][relative_misalign-10:relative_misalign+10],y=1.125)
-    # TODO alignment Query:Sequence
+    plt.xlim(xmin, xmax)
 
-    # ax2=ax1.twiny()
-    # ax2.set_xlabel('Query nt')
-
-    # TODO fix pointer location
-    # Adding pointers on 2nd axis
-    visible_ticks = []
-    for r in range(absolute_position - 8, absolute_position + 10, 1):
-        visible_ticks.append(ab1.annotations["abif_raw"]["PLOC1"][r] - xmin)
-    print(visible_ticks)
-    # ax2.set_xticks(visible_ticks)
-    # ax2.set_xticklabels(range(relative_misalign-8,relative_misalign+10,1))
-    # ax2.plot(ab1.annotations["abif_raw"]["PLOC1"])
+    ax1 = plt.gca()
+    ax1.set_xlabel('Read position')
+    plt.ylim(0, ymax)
 
     # Adding legend for G/A/T/C
     # stolen from somewhere on stackoverflow
-    custom_lines = [Line2D([0], [0], color=clr["DATA9"], lw=4),
-                    Line2D([0], [0], color=clr["DATA10"], lw=4),
-                    Line2D([0], [0], color=clr["DATA11"], lw=4),
-                    Line2D([0], [0], color=clr["DATA12"], lw=4), ]
-    ax.legend(custom_lines, ["G", "A", "T", "C"])
+    custom_lines = [Line2D([0], [0], color=clr["DATA10"], lw=3),
+                    Line2D([0], [0], color=clr["DATA11"], lw=3),
+                    Line2D([0], [0], color=clr["DATA12"], lw=3),
+                    Line2D([0], [0], color=clr["DATA9"], lw=3), ]
+
+    if alignment["orientation"] == 1:
+        ax.legend(custom_lines, ["A", "T", "C", "G"])
+    else:  # ax.legend(custom_lines, ["A", "T", "C","G"])
+        ax.legend(custom_lines, ["T", "A", "G", "C"])  # Consider mentioning in plot that it is reverse position
 
     # saving file
     figname = os.path.join("seq_align", "results", "traces",
-                           alignment["query"][relative_misalign] + str(relative_misalign) + alignment["sequence"][
+                           alignment["query"][relative_misalign] + str(misnr) + alignment["sequence"][
                                relative_misalign] + "_" + ab1.name + ".png")
+
+    plt.axvline(x=readposition)
+
+    ax2 = ax1.twiny()
+    ax2.set_xlabel('Alignment')
+
+    # Adding pointers on 2nd axis
+    visible_ticks = []
+    # https://stackoverflow.com/questions/27728312/matplotlib-ticks-not-align-with-data-point
+    for r in range(absolute_position - 10, absolute_position + 11, 1):
+        visible_ticks.append(int(ab1.annotations["abif_raw"]["PLOC1"][r]))
+    ax2.set_xticks(visible_ticks)
+
+    # print("ax2 tick",ax2.get_xticks())
+    # ax2.set_xticklabels(range(relative_misalign-8,relative_misalign+10,1))
+    # ax2.plot(ab1.annotations["abif_raw"]["PLOC1"])
+    # ax2.set_xticklabels(range(relative_misalign-8,relative_misalign+10,1))
+
+    # Old way of setting tick names. Does the same. Might behave different for RC
+    alignment["seq_reconstituted"] = alignment["query"]
+    for i, char in enumerate(alignment["sequence"]):
+        if char != ".":
+            if alignment["orientation"] == -1:
+                # rep=str(Seq(char).complement())
+                rep = char
+                alignment["seq_reconstituted"] = alignment["seq_reconstituted"][:i] + rep + alignment[
+                                                                                                "seq_reconstituted"][
+                                                                                            i + 1:]
+                alignment["seq_reconstituted"] = str(Seq(alignment["seq_reconstituted"]).complement())
+            else:
+                alignment["seq_reconstituted"] = alignment["seq_reconstituted"][:i] + char + alignment[
+                                                                                                 "seq_reconstituted"][
+                                                                                             i + 1:]
+    # alignment["seq_reconstituted"]=alignment["query"]
+    if alignment["orientation"] == -1:
+        # alignment["seq_reconstituted"]=alignment["seq_reconstituted"][::-1]
+        alignment["seq_reconstituted"] = Seq(alignment["seq_reconstituted"]).reverse_complement()
+        ticks = alignment["seq_reconstituted"][len(alignment["seq_reconstituted"]) - relative_misalign - 11:len(
+                alignment["seq_reconstituted"]) - relative_misalign + 10]  # TODO why do I offset this?
+    else:
+        ticks = alignment["seq_reconstituted"][relative_misalign - 10:relative_misalign + 11]
+    while len(ticks) < 21:
+        print("Short tick ", len(ticks), ticks)
+        ticks = ticks + str(ab1.annotations["abif_raw"]["PBAS1"][absolute_position + (len(ticks)) - 10])
+        print("Extended tick ", len(ticks), ticks)
+    print(ticks, "V1")
+
+    # TODO remove one or the other version
+    ticks2 = ""
+    if alignment["orientation"] == 1:
+        for i in range(-10, 11):
+            ticks2 = ticks2 + str(ab1.annotations["abif_raw"]["PBAS1"][absolute_position + i])
+    else:
+        for i in range(-10, 11):
+            pos = str(ab1.annotations["abif_raw"]["PBAS1"][absolute_position + i])
+            pos = str(Seq(pos).complement())
+            ticks2 = ticks2 + pos
+    print(ticks2, "V2")
+
+    if not ticks == ticks2:
+        raise Exception("WARNING: Ticks not identical")
+
+    ax2.set_xticklabels(ticks)
+    ax2.plot(ab1.annotations["abif_raw"]["PLOC1"])
+
+    # TODO sequence on lower axis, query on upper axis
+    # ax3 = ax2.twiny()
+    # ax2.set_xticklabels(alignment["subject"][relative_misalign-10:relative_misalign+10])
+
+    plt.xlim(xmin, xmax)  # For some reason, setting this again makes the ticks place correclty
+
+    # plt.close()
+
+    plt.gcf().set_size_inches(6, 4)
+    plt.tight_layout()
     plt.savefig(os.path.join(os.getcwd(), figname))
+
     plt.show()
 
-    return [figname,
-            alignment["query"][relative_misalign] + str(relative_misalign) + alignment["sequence"][relative_misalign]]
+    return {"figurefile": figname, "mutation":
+        alignment["query"][relative_misalign] + str(misnr) + alignment["sequence"][relative_misalign],
+            "position": misnr}  # Bugfix relative_misalign to misnr
 
 
 def expasy(sequence):  # remove initial methionine
@@ -337,9 +468,10 @@ def expasy(sequence):  # remove initial methionine
     return r.content
 
 
-def html_love(html_dict, goi, alignment_list, record=None):
+def html_love(html_dict, alignment_list, record=None):
     html_dict["date_seqval"] = "%s-%s-%s" % (datetime.datetime.now().year, str(datetime.datetime.now().month).zfill(2),
                                              str(datetime.datetime.now().day).zfill(2))
+    goi = html_dict["goi"]  # unneccessary renaming. Can't be bothered right now
     html_dict["sequence"] = goi
     html_dict["len_sequence"] = len(goi)
 
@@ -360,15 +492,11 @@ def html_love(html_dict, goi, alignment_list, record=None):
     sorted_features = sorted(record.features, key=lambda x: x.location.start)
     with open(os.path.join(os.getcwd(), "seq_align", "templates", "seqtemplate.txt"), "r") as fh:
         seqtemplate = fh.read()
-    colors = ["blue", "green", "purple", "red", "orange", "pink", "teal", "brown", "cyan", "magenta"]
 
     featurecomprehension = []
     for i in range(0, len(goi)):
         featurecomprehension.append([])
-    try:
-        start = int(html_dict["region"].split(":")[0])
-    except KeyError:
-        start = 0
+    start = html_dict["start"]  # unneccessary
     filtered_features = []
     i = 0
     for feature in sorted_features:
@@ -390,7 +518,19 @@ def html_love(html_dict, goi, alignment_list, record=None):
     annotation_buffer = ""
     level = [-1, -1]
     layer = 0
+    col = ["", ""]
     for i, position in enumerate(featurecomprehension):
+        if not labelcolor:
+            if len(position) > 0:
+                col[0] = colors[position[0]]
+                if len(position) > 1:
+                    col[1] = colors[position[1]]
+        else:
+            if len(position) > 0:
+                col[0] = filtered_features[position[0]].qualifiers["ApEinfo_revcolor"][0]
+                if len(position) > 1:
+                    col[1] = filtered_features[position[1]].qualifiers["ApEinfo_revcolor"][0]
+
         if len(position) == 0:
             if level[0] == -1:
                 sequence_buffer = sequence_buffer + goi[i]
@@ -400,15 +540,18 @@ def html_love(html_dict, goi, alignment_list, record=None):
                 layer = layer + 1
             level[0:1] = [-1, -1]
         elif len(position) == 1:
+            if level[1] != -1:  # Bugfix to: COLOR DOESN'T RETURN TO ORIGINAL WHEN 2nd LEVEL CLOSED
+                sequence_buffer = "%s</font>" % (
+                    sequence_buffer)
             if position[0] == level[0]:
                 sequence_buffer = sequence_buffer + goi[i]
             else:
                 layer = layer + 1
                 level[0] = position[0]
                 sequence_buffer = "%s<span style='font-weight:normal'><font color='%s'>%s" % (
-                    sequence_buffer, colors[position[0]], goi[i])
+                    sequence_buffer, col[0], goi[i])
                 annotation_buffer = "%s<span style='font-weight:normal'><font color='%s'> %s" % (
-                    annotation_buffer, colors[position[0]], filtered_features[position[0]].qualifiers["label"][0])
+                    annotation_buffer, col[0], filtered_features[position[0]].qualifiers["label"][0])
             level[1] = -1
             continue
         elif len(position) >= 2:
@@ -419,22 +562,33 @@ def html_love(html_dict, goi, alignment_list, record=None):
                     level[1] = position[1]
                     layer = layer + 1
                     sequence_buffer = "%s<span style='font-weight:bold'><font color='%s'>%s" % (
-                        sequence_buffer, colors[position[1]], goi[i])
+                        sequence_buffer, col[1], goi[i])
                     annotation_buffer = "%s<span style='font-weight:bold'><font color='%s'> %s" % (
-                        annotation_buffer, colors[position[1]], filtered_features[position[1]].qualifiers["label"][0])
+                        annotation_buffer, col[1], filtered_features[position[1]].qualifiers["label"][0])
             else:
                 level[0], level[1] = position[0], position[1]
                 layer = layer + 1
                 sequence_buffer = "%s<span style='font-weight:bold'><font color='%s'>%s" % (
-                    sequence_buffer, colors[position[0]], goi[i])
+                    sequence_buffer, col[0], goi[i])
                 annotation_buffer = "%s<span style='font-weight:normal'><font color='%s'> %s" % (
-                    annotation_buffer, colors[position[0]], filtered_features[position[0]].qualifiers["label"][0])
+                    annotation_buffer, col[0], filtered_features[position[0]].qualifiers["label"][0])
                 annotation_buffer = "%s<span style='font-weight:bold'><font color='%s'> %s" % (
-                    annotation_buffer, colors[position[1]], filtered_features[position[1]].qualifiers["label"][0])
+                    annotation_buffer, col[1], filtered_features[position[1]].qualifiers["label"][0])
         else:  # len(position)>2
             sequence_buffer = sequence_buffer + goi[i]
     sequence_buffer = sequence_buffer + layer * "</font>"
     annotation_buffer = annotation_buffer + layer * "</font>"
+
+    # Bugfix extends features to multiples of three, to color SNPs. In principle, this makes the checks below redundand
+    for index in range(0, len(featurecomprehension), 3):
+        buffer = []
+        for comprehension in featurecomprehension[index:index + 2]:
+            for element in comprehension:
+                if element not in buffer:
+                    buffer.append(element)
+        featurecomprehension[index] = buffer
+        featurecomprehension[index + 1] = buffer
+        featurecomprehension[index + 2] = buffer
 
     # labeling of protein sequence
     level = [-1, -1]
@@ -442,7 +596,18 @@ def html_love(html_dict, goi, alignment_list, record=None):
     translation_buffer = ""
     protein_buffer = ""
     for i, position in enumerate(featurecomprehension):
-        if len(translation_buffer) % 3 != 0:
+        if not labelcolor:
+            if len(position) > 0:
+                col[0] = colors[position[0]]
+                if len(position) > 1:
+                    col[1] = colors[position[1]]
+        else:
+            if len(position) > 0:
+                col[0] = filtered_features[position[0]].qualifiers["ApEinfo_revcolor"][0]
+                if len(position) > 1:
+                    col[1] = filtered_features[position[1]].qualifiers["ApEinfo_revcolor"][0]
+
+        if len(translation_buffer) % 3 != 0:  # No changes in color before triplet filled. Should give a warning?
             translation_buffer = translation_buffer + goi[i]
         elif len(position) == 0:
             if level[0] == -1:
@@ -455,11 +620,18 @@ def html_love(html_dict, goi, alignment_list, record=None):
                 layer = layer + 1
             level[0], level[1] = [-1, -1]
         elif len(position) == 1:
-            if position[0] == level[0]:
+            if level[1] != -1:  # Bugfix to: COLOR DOESN'T RETURN TO ORIGINAL WHEN 2nd LEVEL CLOSED
+                protein_buffer = "%s%s<span style='font-weight:normal'><font color='%s'>" % (
+                    protein_buffer, Seq(translation_buffer).translate(), col[0])
+                translation_buffer = ""
+                translation_buffer = translation_buffer + goi[i]
+                layer = layer + 1
+                level[0] = position[0]
+            elif position[0] == level[0]:
                 translation_buffer = translation_buffer + goi[i]
             else:
                 protein_buffer = "%s%s<span style='font-weight:normal'><font color='%s'>" % (
-                    protein_buffer, Seq(translation_buffer).translate(), colors[position[0]])
+                    protein_buffer, Seq(translation_buffer).translate(), col[0])
                 translation_buffer = ""
                 translation_buffer = translation_buffer + goi[i]
                 layer = layer + 1
@@ -471,7 +643,7 @@ def html_love(html_dict, goi, alignment_list, record=None):
                     translation_buffer = translation_buffer + goi[i]
                 else:
                     protein_buffer = "%s%s<span style='font-weight:bold'><font color='%s'>" % (
-                        protein_buffer, Seq(translation_buffer).translate(), colors[position[1]])
+                        protein_buffer, Seq(translation_buffer).translate(), col[1])
                     translation_buffer = ""
                     translation_buffer = translation_buffer + goi[i]
                     layer = layer + 1
@@ -480,9 +652,9 @@ def html_love(html_dict, goi, alignment_list, record=None):
                 level[0], level[1] = position[0], position[1]
                 layer = layer + 1
                 protein_buffer = "%s%s<span style='font-weight:normal'><font color='%s'>" % (
-                    protein_buffer, Seq(translation_buffer).translate(), colors[position[0]])
+                    protein_buffer, Seq(translation_buffer).translate(), col[0])
                 protein_buffer = "%s%s<span style='font-weight:bold'><font color='%s'>" % (
-                    protein_buffer, Seq(translation_buffer).translate(), colors[position[1]])
+                    protein_buffer, Seq(translation_buffer).translate(), col[1])
                 translation_buffer = ""
                 translation_buffer = translation_buffer + goi[i]
         else:  # len(position)>2
@@ -510,13 +682,23 @@ def html_love(html_dict, goi, alignment_list, record=None):
                             seqformat = seqformat.replace("#SEQ_PRIMER#", ab1.annotations["abif_raw"]["CMNT1"])
                             seqformat = seqformat.replace("#SEQ_DATE#", ab1.annotations["abif_raw"]["RUND1"])
                             seqformat = seqformat.replace("#SEQ_READ#", str(ab1.seq))
-                            alignment_range = "1-%s,%s-end" % (min(alignment["misalign"]), max(alignment["misalign"]))
+                            try:
+                                alignment_range = "1-%s, %s-%s" % (traces[0]["position"], traces[-1]["position"],
+                                                                   alignment["que_end"])  # TODO why is queue range off?
+                                if alignment["que_end"] == len(goi):
+                                    alignment_range = alignment_range + " (end)"
+                                # TODO define if this is end or not
+                            except:
+                                alignment_range = "1-%s" % (alignment["que_end"])
+                                if alignment["que_end"] == len(goi):
+                                    alignment_range = alignment_range + " (end)"
                             seqformat = seqformat.replace("#BLAST_VAL#", alignment_range)
                             seqformat = seqformat.replace("#BLAST#", alignment["html_tiny_blast"])
                             for trace in traces:
                                 seqformat = seqformat.replace("#TRACE#",
-                                                              "<img src='%s' width='300'> #TRACE#" % trace[0])
-                                seqformat = seqformat.replace("#TRACE_REG#", trace[1] + " #TRACE_REG#")
+                                                              "<img src='%s' width='300'> #TRACE#" % trace[
+                                                                  "figurefile"])
+                                seqformat = seqformat.replace("#TRACE_REG#", trace["mutation"] + " #TRACE_REG#")
                             if len(traces) == 0:
                                 seqformat = seqformat.replace("#TRACE_REG#", "None")
                             else:
@@ -544,7 +726,12 @@ def html_love(html_dict, goi, alignment_list, record=None):
 
 
 if __name__ == '__main__':
+    username = "Your name"  # Put your name here
+    labelcolor = False  # Use this if you want the labels to be colored according to genbank file
+    colors = ["blue", "green", "purple", "red", "orange", "pink", "teal", "brown", "cyan",
+              "magenta"]  # redefine color scheme
+    # wd=os.getcwd() #set directory. By default, directory of this file wd=os.getcwd()
     wd = "C:\\Users\\Arne Scheu\\Desktop\\qol"
-    username = "Arne Scheu"
-    os.chdir(wd)
+    os.chdir(wd)  # this is the terminal directory, not file directory. Proabably better this way?
+
     master()
