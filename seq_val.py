@@ -1,5 +1,5 @@
 __author__ = "Arne Scheu"
-__date__ = "2018-05-20"
+__date__ = "2018-06-03"
 
 import csv
 import datetime
@@ -15,10 +15,10 @@ from matplotlib.lines import Line2D
 # https://github.com/Cadair/jupyter_environment_kernels/issues/10
 try:
     FileNotFoundError
-except NameError:
-    # py2
+except NameError:  # python2
     FileNotFoundError = IOError
     print("Defined FileNotFoundError as IOError. Are you running python2?")
+
 
 def master():
     # Defining which files to handle from task.txt file
@@ -51,14 +51,18 @@ def master():
         alignment_list = []
         for ab1_path in ab1_list:
             if local_nblast(task["goi"], ab1_path) != 0:
+                print("WARNING - Could not find " + ab1_path)
                 continue
             alignment = interpret_blast()
+            if not alignment:
+                print("WARNING - Bad alignment in " + ab1_path)
+                continue
             ab1 = SeqIO.read(ab1_path, 'abi')
             traces = handle_alignment(ab1, alignment)
             alignment_list.append({"ab1": ab1, "alignment": alignment, "traces": traces})
 
         # Create expasy, removing first residue ([3:]
-        with  open(os.path.join(wd, "seq_align", "temp", "nomet_expasy.html"), "w+") as ex:
+        with open(os.path.join(wd, "seq_align", "temp", "nomet_expasy.html"), "w+") as ex:
             ex.write(expasy(task["goi"][3:].translate(to_stop=True)).decode("utf-8"))
 
         # Compiles all previous data
@@ -86,11 +90,12 @@ def define_goi(task):  # not bothering with -1 strand
             for feature in record.features:
                 if "GOI" in feature.qualifiers["label"]:  # define label name by genbank file?
                     start, end = int(feature.location.start), int(feature.location.end)
-                    return {"record": record, "goi": record.seq[start - 1:end - 1], "start": start, "end": end}
+                    return {"record": record, "goi": record.seq[start:end], "start": start + 1, "end": end + 1}
             if not task["region"] is "":  # define sequence from region
                 start = int(task["region"].split(":")[0])
                 end = int(task["region"].split(":")[1])
-                return {"record": record, "goi": record.seq[start - 1:end - 1], "start": start, "end": end}
+                return {"record": record, "goi": record.seq[start:end], "start": start - 1,
+                        "end": end - 1}  # TODO is -1 correct?
             elif not task["sequence"] is None:  # define region from sequence
                 goi = Seq(task["sequence"])
                 start = int(str(record.seq.find(str(goi).upper())))
@@ -146,7 +151,7 @@ def local_nblast(goi, seqfile):  # better to switch to pairwise2 instead of nbla
     out_temp = os.path.join("seq_align", "temp", "blast_temp.txt")
     # execute nblast using installation
     command = (
-            'blastn -subject "%s" -query %s -dust no -outfmt 3 >%s' % (
+            'blastn -subject "%s" -query %s -dust no -outfmt 3 -num_alignments 1 >%s' % (
         seq_temp, query_temp, out_temp))  # output 7 creates xml biopython blast output. Biopython can read
     return os.system(command)
 
@@ -157,15 +162,17 @@ def interpret_blast(
         start, space = False, 0
         subject = {"query": "", "sequence": "", "misalign": []}
         subject["tiny_blast"] = ""
-        subject["seq_range"] = [False, False]
-        subject["que_end"] = False
+        subject["seq_range"] = [0, 0]
+        subject["que_range"] = [0, 0]
         for line in raw_blast:
             space += 1
             if "Query_1" in line:
                 start, space = True, 0
                 linesplit = list(filter(None, line.strip("\n").split(" ")))
                 subject["query"] = subject["query"] + linesplit[2]
-                subject["que_end"] = int(linesplit[3])
+                subject["que_range"][1] = int(linesplit[3])
+                if not subject["que_range"][0]:
+                    subject["que_range"][0] = int(linesplit[1])
             if start:
                 if space == 1:
                     linesplit = list(filter(None, line.strip("\n").split(" ")))
@@ -192,11 +199,17 @@ def interpret_blast(
                                 cont = False
                             else:
                                 linesplit_rec = linesplit_rec + char
+                    if cont == True:
+                        linesplit_rec = linesplit_rec + "</font>"  # Bugfix character at end of line didn't close color
                     subject["tiny_blast"] = subject["tiny_blast"] + line.replace(linesplit[2], linesplit_rec)
 
                 elif space > 2:  # stop after last query:subject block
                     break
                 else:
+                    if "Subject" in line:
+                        print("Warning: BLAST aligns multiple times, check your trace. Will not process trace")
+                        # raise Exception("Poor read!")
+                        return False
                     subject["tiny_blast"] = subject["tiny_blast"] + line
 
         for i, character in enumerate(subject["sequence"]):
@@ -206,6 +219,12 @@ def interpret_blast(
         subject["html_tiny_blast"] = subject["tiny_blast"].replace("\n", "<br>").replace(" ", "&nbsp;").replace(
                 "#style#",
                 style)
+
+    if subject["seq_range"][0] < subject["seq_range"][1]:
+        subject["orientation"] = 1
+    else:
+        subject["orientation"] = -1
+
     return subject
 
 
@@ -240,86 +259,49 @@ def handle_alignment(ab1, alignment):
     #print("guide_1",len(guide),guide)
     """
 
-    offset = 0
-    name_offset = 0
-    if alignment["seq_range"][0] < alignment["seq_range"][1]:
-        alignment["orientation"] = 1
-        misalign = alignment["misalign"]
-    else:
-        alignment["orientation"] = -1  # I need to parse through the guide in inverse manner...
-        # guide=guide[::-1]
-        misalign = alignment["misalign"]  # [::-1]
-        print(misalign)
-        # misalign=alignment["misalign"]
-        # print(misalign)
-
-    # TODO make font size bigger
+    traceoffset = 0
+    queryoffset = 0
 
     for position, char in enumerate(guide):
-        if position in misalign:
-            traces.append(chromatogram(position, offset, ab1, alignment, name_offset))
+        print(alignment["misalign"], char, position, traceoffset, queryoffset)
+        if position in alignment["misalign"]:
+            traces.append(chromatogram(position, traceoffset, queryoffset, ab1, alignment))
 
         if char == ".":
             pass
-        elif char == "+":  # THIS MUST NOT CREATE AN OFFSET AS BLAST DOES NOT INCREMENT QUERY NR
-            pass
+        elif char == "+":
+            queryoffset = queryoffset - 1
         elif char == "-":
-            offset = offset - 1
-            print(alignment["misalign"], char, position, offset)
+            traceoffset = traceoffset - 1
 
-    """
-    for relative_misalign in misalign:
-            traces.append(chromatogram(relative_misalign, offset, ab1, alignment))
-            print(relative_misalign,"guide",len(guide)) #TODO T7R this should trigger at 14, but doesn't
-            if guide[relative_misalign] == ".":
-                pass
-            elif guide[relative_misalign] == "+":
-                offset = offset + 1 #TODO should only one value create an offset?
-            elif guide[relative_misalign] == "-":
-                offset = offset - 1
-    """
-    """
-    offset = 0
-    for relative_misalign in alignment["misalign"]:
-        if alignment["seq_range"][0] < alignment["seq_range"][1]:
-            alignment["orientation"] = 1
-            traces.append(chromatogram(relative_misalign, offset, ab1, alignment))
-            if guide[relative_misalign] == ".":
-                pass
-            elif guide[relative_misalign] == "+":
-                offset = offset + 1
-            elif guide[relative_misalign] == "-":
-                offset = offset - 1
-        else:
-            alignment["orientation"] = -1
-            if guide[relative_misalign] == ".":
-                pass
-            elif guide[relative_misalign] == "+":
-                offset = offset + 1
-            elif guide[relative_misalign] == "-":
-                offset = offset - 1
-            traces.append(chromatogram(relative_misalign, offset, ab1, alignment))
-    """
     return traces
 
 
-def chromatogram(relative_misalign, offset, ab1, alignment, name_offset):
+def chromatogram(BLAST_position, offset, queryoffset, ab1, alignment):
+    # https://stackoverflow.com/questions/3899980/how-to-change-the-font-size-on-a-matplotlib-plot
+    plt.rc('font', size=14)  # controls default text sizes
+    plt.rc('axes', titlesize=14)  # fontsize of the axes title
+    plt.rc('axes', labelsize=13)  # fontsize of the x and y labels
+    plt.rc('xtick', labelsize=14)  # fontsize of the tick labels
+    plt.rc('ytick', labelsize=14)  # fontsize of the tick labels
+    plt.rc('legend', fontsize=12)  # legend fontsize
+    plt.rc('figure', titlesize=16)  # fontsize of the figure title
+
+    rel = BLAST_position + offset
+    start = alignment["seq_range"][0] - 1
+    misnr = alignment["que_range"][0] + BLAST_position + queryoffset
     if alignment["orientation"] == 1:
-        rel = relative_misalign + offset
-        absolute_position = alignment["seq_range"][0] + rel - 1
-        misnr = relative_misalign + 1  # TODO WHY DO I NEED SHIFT HERE?
+        absolute_position = start + rel  # base start-1 = array start
     else:
-        rel = relative_misalign + offset  # + or - offset?
-        absolute_position = alignment["seq_range"][0] - rel - 1
-        misnr = relative_misalign  # TODO WHAT IS THIS ACTUALLY? DON'T REALLY KNOW ANYMORE
-        print(absolute_position, alignment["seq_range"])
+        absolute_position = start - rel  # base start-1 = array start
+    print(absolute_position, alignment["seq_range"])
 
     readposition = ab1.annotations["abif_raw"]["PLOC1"][absolute_position]
 
     print("actual position and read", str(absolute_position), ab1.seq[absolute_position - 2:absolute_position + 2],
           ab1.seq[absolute_position])  # 1227,1224
-    print("relative_misalign and query, subject", relative_misalign, alignment["query"][relative_misalign],
-          alignment["sequence"][relative_misalign])
+    print("BLAST_position and query, subject", BLAST_position, alignment["query"][BLAST_position],
+          alignment["sequence"][BLAST_position])
     print("read position", readposition)
 
     # http://biopython.org/wiki/ABI_traces
@@ -346,19 +328,26 @@ def chromatogram(relative_misalign, offset, ab1, alignment, name_offset):
         print("Index end of chromatogram, defaulting to maximum")
         xmax = len(ab1.annotations["abif_raw"]["DATA9"])
 
-
     ax = plt.subplot()
 
-    # plt.title("Misaligned " + alignment["query"][relative_misalign] + str(misnr) + alignment["sequence"][
-    #    relative_misalign] + ", ab1" + str(
+    # plt.title("Misaligned " + alignment["query"][BLAST_position] + str(misnr) + alignment["sequence"][
+    #    BLAST_position] + ", ab1" + str(
     #        readposition)  + " offset " + str(offset),  y=1.2)
 
-    plt.title(alignment["query"][relative_misalign] + str(misnr) + alignment["sequence"][relative_misalign], y=1.15)
-    # plt.title(alignment["query"][relative_misalign-10:relative_misalign+10],y=1.125)
-    plt.xlim(xmin, xmax)
+    plt.title(alignment["query"][BLAST_position] + str(misnr) + alignment["sequence"][BLAST_position], y=1.15)
+    # plt.title(alignment["query"][BLAST_position-10:BLAST_position+10],y=1.125)
+    if alignment["orientation"] == 1:
+        plt.xlim(xmin, xmax)  # For some reason, setting this again makes the ticks place correclty
+    else:
+        plt.xlim(xmax, xmin)
 
     ax1 = plt.gca()
-    ax1.set_xlabel('Read position')
+
+    if alignment["orientation"] == 1:
+        ax1.set_xlabel('Sequencing')
+    else:
+        ax1.set_xlabel('Sequencing RC')
+
     plt.ylim(0, ymax)
 
     # Adding legend for G/A/T/C
@@ -375,13 +364,13 @@ def chromatogram(relative_misalign, offset, ab1, alignment, name_offset):
 
     # saving file
     figname = os.path.join("seq_align", "results", "traces",
-                           alignment["query"][relative_misalign] + str(misnr) + alignment["sequence"][
-                               relative_misalign] + "_" + ab1.name + ".png")
+                           alignment["query"][BLAST_position] + str(misnr) + alignment["sequence"][
+                               BLAST_position] + "_" + ab1.name + ".png")
 
     plt.axvline(x=readposition)
 
     ax2 = ax1.twiny()
-    ax2.set_xlabel('Alignment')
+    ax2.set_xlabel('Query')
 
     # Adding pointers on 2nd axis
     visible_ticks = []
@@ -389,35 +378,30 @@ def chromatogram(relative_misalign, offset, ab1, alignment, name_offset):
     for r in range(absolute_position - 10, absolute_position + 11, 1):
         visible_ticks.append(int(ab1.annotations["abif_raw"]["PLOC1"][r]))
     ax2.set_xticks(visible_ticks)
+    ax1.set_xticks(visible_ticks)
 
-    # print("ax2 tick",ax2.get_xticks())
-    # ax2.set_xticklabels(range(relative_misalign-8,relative_misalign+10,1))
-    # ax2.plot(ab1.annotations["abif_raw"]["PLOC1"])
-    # ax2.set_xticklabels(range(relative_misalign-8,relative_misalign+10,1))
-
-    # Old way of setting tick names. Does the same. Might behave different for RC
+    fitquery = []
     alignment["seq_reconstituted"] = alignment["query"]
+    hold = ""
     for i, char in enumerate(alignment["sequence"]):
-        if char != ".":
-            if alignment["orientation"] == -1:
-                # rep=str(Seq(char).complement())
-                rep = char
-                alignment["seq_reconstituted"] = alignment["seq_reconstituted"][:i] + rep + alignment[
-                                                                                                "seq_reconstituted"][
-                                                                                            i + 1:]
-                alignment["seq_reconstituted"] = str(Seq(alignment["seq_reconstituted"]).complement())
-            else:
-                alignment["seq_reconstituted"] = alignment["seq_reconstituted"][:i] + char + alignment[
-                                                                                                 "seq_reconstituted"][
-                                                                                             i + 1:]
-    # alignment["seq_reconstituted"]=alignment["query"]
+        alignment["seq_reconstituted"] = alignment["seq_reconstituted"][:i] + char + alignment[
+                                                                                         "seq_reconstituted"][
+                                                                                     i + 1:]
+        if char == "-":
+            hold = hold + alignment["query"][i]
+        else:
+            hold = hold + alignment["query"][i]
+            fitquery.append(hold)
+            hold = ""
+
+    alignment["seq_reconstituted"] = alignment["seq_reconstituted"].replace("-", "")
+
     if alignment["orientation"] == -1:
-        # alignment["seq_reconstituted"]=alignment["seq_reconstituted"][::-1]
-        alignment["seq_reconstituted"] = Seq(alignment["seq_reconstituted"]).reverse_complement()
-        ticks = alignment["seq_reconstituted"][len(alignment["seq_reconstituted"]) - relative_misalign - 11:len(
-                alignment["seq_reconstituted"]) - relative_misalign + 10]  # TODO why do I offset this?
+        alignment["seq_reconstituted"] = alignment["seq_reconstituted"][::-1]
+        ticks = alignment["seq_reconstituted"][len(alignment["seq_reconstituted"]) - rel - 11:len(
+                alignment["seq_reconstituted"]) - rel + 10]
     else:
-        ticks = alignment["seq_reconstituted"][relative_misalign - 10:relative_misalign + 11]
+        ticks = alignment["seq_reconstituted"][rel - 10:rel + 11]
     while len(ticks) < 21:
         print("Short tick ", len(ticks), ticks)
         ticks = ticks + str(ab1.annotations["abif_raw"]["PBAS1"][absolute_position + (len(ticks)) - 10])
@@ -432,33 +416,37 @@ def chromatogram(relative_misalign, offset, ab1, alignment, name_offset):
     else:
         for i in range(-10, 11):
             pos = str(ab1.annotations["abif_raw"]["PBAS1"][absolute_position + i])
-            pos = str(Seq(pos).complement())
+            pos = str(Seq(pos).complement())  # seq class doesn't correctly handle W, B, ... but unused
             ticks2 = ticks2 + pos
     print(ticks2, "V2")
 
     if not ticks == ticks2:
-        raise Exception("WARNING: Ticks not identical")
+        print("Warning: Ticks not identical")
 
+    ax1.set_xticklabels(ticks)
+
+    if alignment["orientation"] == 1:
+        ticks = fitquery[rel - 10:rel + 11]
+    else:
+        print(alignment["query"])
+        ticks = fitquery[rel - 10:rel + 11][::-1]
     ax2.set_xticklabels(ticks)
-    ax2.plot(ab1.annotations["abif_raw"]["PLOC1"])
 
-    # TODO sequence on lower axis, query on upper axis
-    # ax3 = ax2.twiny()
-    # ax2.set_xticklabels(alignment["subject"][relative_misalign-10:relative_misalign+10])
-
-    plt.xlim(xmin, xmax)  # For some reason, setting this again makes the ticks place correclty
-
+    if alignment["orientation"] == 1:
+        plt.xlim(xmin, xmax)  # For some reason, setting this again makes the ticks place correctly
+    else:
+        plt.xlim(xmax, xmin)
     # plt.close()
 
-    plt.gcf().set_size_inches(6, 4)
+    plt.gcf().set_size_inches(6, 5)
     plt.tight_layout()
     plt.savefig(os.path.join(os.getcwd(), figname))
 
     plt.show()
 
     return {"figurefile": figname, "mutation":
-        alignment["query"][relative_misalign] + str(misnr) + alignment["sequence"][relative_misalign],
-            "position": misnr}  # Bugfix relative_misalign to misnr
+        alignment["query"][BLAST_position] + str(misnr) + alignment["sequence"][BLAST_position],
+            "position": misnr}  # Bugfix BLAST_position to misnr
 
 
 def expasy(sequence):  # remove initial methionine
@@ -534,7 +522,7 @@ def html_love(html_dict, alignment_list, record=None):
         if len(position) == 0:
             if level[0] == -1:
                 sequence_buffer = sequence_buffer + goi[i]
-            else:
+            else:  # TODO fontweight back to normal
                 sequence_buffer = "%s<span style='font-weight:normal'><font color='black'>%s" % (
                     sequence_buffer, goi[i])
                 layer = layer + 1
@@ -683,14 +671,14 @@ def html_love(html_dict, alignment_list, record=None):
                             seqformat = seqformat.replace("#SEQ_DATE#", ab1.annotations["abif_raw"]["RUND1"])
                             seqformat = seqformat.replace("#SEQ_READ#", str(ab1.seq))
                             try:
-                                alignment_range = "1-%s, %s-%s" % (traces[0]["position"], traces[-1]["position"],
-                                                                   alignment["que_end"])  # TODO why is queue range off?
-                                if alignment["que_end"] == len(goi):
+                                alignment_range = "%s-%s, %s-%s" % (
+                                    alignment["que_range"][0], traces[0]["position"], traces[-1]["position"],
+                                    alignment["que_range"][1])
+                                if alignment["que_range"][1] == len(goi):
                                     alignment_range = alignment_range + " (end)"
-                                # TODO define if this is end or not
                             except:
-                                alignment_range = "1-%s" % (alignment["que_end"])
-                                if alignment["que_end"] == len(goi):
+                                alignment_range = "%s-%s" % (alignment["que_range"][0], alignment["que_range"][1])
+                                if alignment["que_range"][1] == len(goi):
                                     alignment_range = alignment_range + " (end)"
                             seqformat = seqformat.replace("#BLAST_VAL#", alignment_range)
                             seqformat = seqformat.replace("#BLAST#", alignment["html_tiny_blast"])
