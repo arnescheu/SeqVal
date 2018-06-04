@@ -1,0 +1,75 @@
+DO NOT SUBMIT SEQUENCE VALIDATION FILES AS THEY ARE GENERATED!!!
+This tool is meant to make it faster and easier on you,
+but you still have to go through everything and check it yourself.
+AT LEAST:
+	check that everything is OK
+	go through file and adjust read areas (it gives you Start-First Error, Last Error-End, not region of interest)
+	comment on how you interpret traces
+	at the top and bottom is a big red warning row to remind you!
+	save a new file and without _aSV in filename ("Automated sequence validation")
+It is your responsibility - I am not taking responsibility if something goes wrong...
+But if you do notice any irregularities, please talk to me.
+
+FIRST-TIME SETUP
+1) Install python from here https://www.python.org/downloads/
+2) Install packages after installing python. Type in terminal:
+	python -mpip install biopython
+	python -mpip install matplotlib
+	python -mpip install requests
+	[If this fails, you probably don't have python installed correctly.]
+	[If you want to use automatic conversion to doc in windows ("-w2d" flag) you also need pywin32: python -mpip install pywin32]
+3) Install blastn from here: ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
+    Test by typing "blastn" in terminal. If you get a message like this then all is installed fine: "BLAST query/options error: Either a BLAST..."
+4) Test if everything works by using the files in the example folder
+	[Set terminal directory to the folder or use -wd "working directory" flag to set folder]
+
+Flags to use in terminal (see "FOR REGULAR USE - 3)":
+    Flags followed by string:
+	-u "username" (default to system user)
+	-wd "working directory" (default to current terminal directory)
+    Flag toggles:
+    -aa (annotation area; provide nucleotide stretches for annotations, e.g. His6 (nt 9-26), default False) #suggestion by Anne-Marie
+	-lc (labelcolor; use label color scheme from genbank file, default False)
+	-v (verbosity; turns verbosity of output OFF, i.e. less cluttered output, default True)
+	-w2d (windows to .doc; automatic conversion form .htm to .doc, only on windows, default False)
+
+FOR REGULAR USE
+1) Get your ab1 files. Genbank files can be exported from benchling. Put the ones you want for your sequence validation into one folder
+2) Open the task.txt in excel. Define which sequences belong to which genbank files, add names, etc.
+    - Define multiple sequence traces to one file by adding columns ("sequencing_3","sequencing_4"...), or by separating them with ";" within a field
+        - Do not leave column titles blank if you put values in! This crashes the program
+    - In task.txt, also provide the region of interest, by giving a region (150:210) or sequence ("ATG....TAA")
+        - Alternatively, a feature in the genbank file called "GOI" also works. Priority is region>sequence>"GOI"
+    - Save as tab seperated values, task.txt
+3) Run the file in terminal (see "flags to use":
+        python PYTHONFILE -wd FILEFOLDER -u USERNAME -v -aa ...
+    for example:
+        python "C:\\Users\\Arne Scheu\\Download\\AS2018-06-06_SeqVal\\seq_val\\seq_val.py" -wd "C:\\Users\\Arne Scheu\\Download\\AS2018-06-06_SeqVal\\example"
+    or:
+        cd "Downloads\\AS2018-06-06_SeqVal"
+        python "seq_val\\seq_val.py" -u "Arne Scheu"
+4) Open .htm files, copy contents to word document. Should have correct formatting
+    - If running windows, you can use the label "-w2d" for automatic conversion. Close word first.
+5) IMPORTANT: Adjust read areas, it gives you some information (first mismatch, last mismatch, largest frame of two mismatches)
+
+SOME POTENTIAL ERRORS:
+If you get a warning or exception (i.e. it crashes), it should tell you what went wrong. Ask me if you want to know more.
+Aside from that:
+1) I think your gene should not go through 0 in your sequence. This probably doesn't work.
+2) Parts missing from final file
+	- Did you provide genbank and ab1 correctly? Did you fill out fields?
+3) Labels in genbank file not annotated
+	- The program only uses labels with the type "CDS" or "protein". A feature labelled "GOI" is used to define region and otherwise ignored
+	- Strand -1 is ignored
+	- Only 2 overlapping layers of features are recognized. The inner one will be bold
+4) Label colors are not the same as in genbank/benchling
+	- This is intentional, as people usually have ugly colors in the genbank file...
+	- The color scheme: colors = ["navy", "green", "orange", "red", "purple", "mint", "olive", "maroon", "coral", "brown", "gold"]
+	    - 	Note: This can give an index error if you have more features than colors (if they are not filtered out, see above).
+	    - 	In this case, it could be better to use colors by label. Use the flag "-lc"
+	- If you don't like the color scheme, you can change it (at the bottom of the seq_val.py file).
+	    - If you want to share, tell me your favorite!
+5) My .htm files don't have images!
+	- htm files don't save images, just provide a path. You moved or overwrote a file. Copy to word to make it permanent
+
+Talk to me if you have any questions or suggestions.

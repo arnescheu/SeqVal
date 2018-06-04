@@ -1,10 +1,14 @@
 __author__ = "Arne Scheu"
-__date__ = "2018-06-04"
+__date__ = "2018-06-07"
 __version__ = "1.0"
+print("Automated sequence validation tool - Version {}:{} - {}".format(__version__, __date__, __author__))
 
+import argparse
 import csv
 import datetime
+import getpass
 import os
+import platform
 from collections import defaultdict
 
 import matplotlib.pyplot as plt
@@ -18,11 +22,18 @@ try:
     FileNotFoundError
 except NameError:  # python2
     FileNotFoundError = IOError
-    print("WARNING defined FileNotFoundError as IOError. Are you running python2? \n")
+    print("WARNING defined FileNotFoundError as IOError. You are likely running python2")
 
 def master():
+    if not os.path.exists(os.path.join(args.wd, "results", "traces")):
+        os.makedirs(os.path.join(args.wd, "results", "traces"))
+    if not os.path.exists(os.path.join(args.wd, "results", "htm")):
+        os.makedirs(os.path.join(args.wd, "results", "htm"))
+    if args.win_convert_doc and not os.path.exists(os.path.join(args.wd, "results", "doc")):
+        os.makedirs(os.path.join(args.wd, "results", "doc"))
+
     for task in define_task(
-            os.path.join(wd, "task.txt")):  # define_task: Defining which files to handle from task.txt file
+            os.path.join(args.wd, "task.txt")):  # define_task: Defining which files to handle from task.txt file
         print("Processing task %s %s %s" % (task["gene"], task["clone"], task["plasmid"]))
 
         # Defining gene of interest based on genbank and region or sequence field.
@@ -36,12 +47,12 @@ def master():
             if "sequencing" in key:  # sequencing1, sequencing2,...
                 if task[key] is not "":
                     split = task[key].split(";")  # sequencing filename1;filename2 also works
-                    for path in split:
-                        ab1_list.append(path)
+                    for filename in split:
+                        ab1_list.append(os.path.join(args.wd, filename))
 
         # defaulting to all ab1 in directory if none defined
         if not ab1_list:
-            for files in os.walk(wd):
+            for files in os.walk(args.wd):
                 if ".ab1" in files:
                     ab1_list.append(files)
             print("WARNING no .ab1 traces were defined for %s. DEFAULT to all traces - %s" % (
@@ -59,17 +70,30 @@ def master():
             if not alignment:
                 continue
             ab1 = SeqIO.read(ab1_path, 'abi')
-            traces = handle_alignment(ab1, alignment, task["gene"])
+            traces = handle_alignment(ab1, alignment, "{}-{}_aSV.htm".format(task["construct"], task["clone"]))
             alignment_list.append({"ab1": ab1, "alignment": alignment, "traces": traces})
 
         # Create expasy, removing first residue ([3:]
-        with open(os.path.join(wd, "seq_align", "temp", "nomet_expasy.html"), "w+") as ex:
-            ex.write(expasy(task["goi"][3:].translate(to_stop=True)).decode("utf-8"))
+        with open(os.path.join(script_dir, "temp", "nomet_expasy.html"), "w+") as ex:
+            expasy_result = expasy(task["goi"][3:].translate(to_stop=True))
+            if expasy_result:
+                ex.write(expasy_result.decode("utf-8"))
+            else:
+                ex.write(
+                        "<User-provided sequence:</h2><font color='red'>No internet connection - failed to retrieve expasy.</font>")  # A bit shoddy. This gets later recognised as the "body" of the expasy file and inserted to final file
 
         # Compiles all previous data
-        task["user"] = username
-        html_love(task, alignment_list)
-
+        task["user"] = args.user
+        html_file = html_love(task, alignment_list)
+        print("Task processed. Check {}.htm \n".format(os.path.join(args.wd, "results", "htm", html_file)))
+        if platform.system() == "Windows" and args.win_convert_doc:
+            print("Experimental, trying to convert {}.htm to word".format(html_file))
+            try:
+                print("Conversion successful. Check %s" % word_hate(html_file))
+                print("WARNING: Images are not embedded \n")
+                # TODO save unlinked/embedded images
+            except Exception as e:
+                print("Failed to convert to word file. Try closing word first. Exception {}".format(e))
     print("All tasks complete.")
 
 def define_task(taskfile):
@@ -84,32 +108,41 @@ def define_task(taskfile):
 
 def define_goi(task):  # not bothering with -1 strand
     if not task["genbank"] is "":
+        task["genbank_path"] = os.path.join(args.wd, task["genbank"])
         try:
-            record = SeqIO.read(task["genbank"], "genbank")
-            for feature in record.features:
-                if "GOI" in feature.qualifiers["label"]:  # define label name by genbank file?
-                    start, end = int(feature.location.start), int(
-                            feature.location.end)  # location.start/end are already adjusted to index, -1
-                    return (record.seq[start:end], start, record)
+            record = SeqIO.read(task["genbank_path"], "genbank")
+
             if not task["region"] is "":  # define sequence from region
-                start, end = int(task["region"].split(":")[0]) - 1, int(task["region"].split(":")[1]) - 1
+                start, end = int(task["region"].split(":")[0]) - 1, int(task["region"].split(":")[1])
+                if args.verbose:
+                    print("\tDefining region as provided: Start {} end {}".format(start + 1, end))
                 return (record.seq[start:end], start, record)
-            elif not task["sequence"] is None:  # define region from sequence
-                goi = Seq(task["sequence"])
+            if not task["sequence"] == "":  # define region from sequence
+                goi = Seq(task["sequence"].upper())
                 start = int(str(record.seq.find(str(goi).upper())))
                 if start == -1:
-                    raise Exception("Sequence provided but not found in gb!")
+                    raise Exception("Sequence provided but not found in genbank!")
+                if args.verbose:
+                    print("\tDefining region by sequence found in genbank: Start {} end {}".format(start + 1,
+                                                                                                   len(goi) + start))
                 return (goi, start, record)
+            for feature in record.features:
+                if "GOI" in feature.qualifiers["label"]:
+                    start, end = int(feature.location.start), int(
+                            feature.location.end)  # location.start is already adjusted to index, -1
+                    if args.verbose:
+                        print("\tDefining region by GOI label in genbank: Start {} end {}".format(start + 1, end))
+                    return (record.seq[start:end], start, record)
             else:
                 print("WARNING gene not defined by region/sequence/annotation. Default to entire genbank region")
                 return (record.seq, 0, record)
         except FileNotFoundError:
-            if not task["sequence"] is None:
-                print("WARNING %s not found! DEFAULT to sequence provided" % task["genbank"])
+            if not task["sequence"] is "":
+                print("WARNING %s not found! DEFAULT to sequence provided" % task["genbank_path"])
                 return (Seq(task["sequence"]), 0, False)
             else:
                 # TODO if permissive: return False
-                raise FileNotFoundError(task["genbank"] + " not found!")
+                raise FileNotFoundError(task["genbank_path"] + " not found!")
     elif not task["sequence"] is None:
         print("WARNING no genbank provided. DEFAULT to sequence provided")
         return (Seq(task["sequence"]), 0, False)
@@ -132,8 +165,8 @@ def online_nblast(goi,ab1_path):
 
 
 def local_nblast(goi, seqfile):  # better to switch to pairwise2 instead of nblast?
-    query_temp = os.path.join("seq_align", "temp", "BLAST_query.fa")
-    seq_temp = os.path.join("seq_align", "temp", "BLAST_sequence.fa")
+    query_temp = os.path.join(script_dir, "temp", "BLAST_query.fa")
+    seq_temp = os.path.join(script_dir, "temp", "BLAST_sequence.fa")
 
     # converts goi sequence to file for blast
     with open(query_temp, "w+") as fh:
@@ -146,17 +179,18 @@ def local_nblast(goi, seqfile):  # better to switch to pairwise2 instead of nbla
         return seqfile + " not found. Skipping BLAST."
 
     # resultfile location
-    out_temp = os.path.join("seq_align", "temp", "blast_temp.txt")
+    out_temp = os.path.join(script_dir, "temp", "blast_temp.txt")
     # execute nblast using installation
     command = (
-            'blastn -subject "%s" -query %s -dust no -outfmt 3 -num_alignments 1 >%s' % (
-        seq_temp, query_temp, out_temp))  # output 7 creates xml biopython blast output. Biopython can read
+            'blastn -subject "%s" -query "%s" -dust no -outfmt 3 -num_alignments 1 >"%s"' % (
+        seq_temp, query_temp, out_temp))
+    # output 7 creates xml biopython blast output. Biopython can read
     return os.system(command)
 
 
 def interpret_blast(
         blastfile="blast_temp.txt"):  # converts blast output so subject/query. Very bad practice, could just use other modules
-    with open(os.path.join(os.getcwd(), "seq_align", "temp", blastfile), "r") as raw_blast:
+    with open(os.path.join(script_dir, "temp", blastfile), "r") as raw_blast:
         start, space = False, 0
         subject = {"query": "", "sequence": "", "misalign": []}
         subject["tiny_blast"] = ""
@@ -384,7 +418,7 @@ def chromatogram(blast_position, offset, query_offset, ab1, alignment, taskname)
     # if len(ticks)<21: print(ticks, "Short trace. Extending by", 21-len(ticks))
     while len(ticks) < 21:
         ticks = ticks + str(ab1.annotations["abif_raw"]["PBAS1"][absolute_position + (len(ticks)) - 10])
-    if verbose:
+    if args.verbose:
         print("\t\tPosition %s chromatogram %s ab1 %s task %s" % (mutation.ljust(6, " "), ticks, taskname, ab1.name))
 
     """
@@ -415,8 +449,8 @@ def chromatogram(blast_position, offset, query_offset, ab1, alignment, taskname)
     plt.tight_layout()
 
     # saving file
-    figname = os.path.join("seq_align", "results", "traces", taskname + "_" + mutation + "_" + ab1.name + ".png")
-    plt.savefig(os.path.join(os.getcwd(), figname))
+    figname = os.path.join("{}_{}_{}.png".format(taskname, mutation, ab1.name))
+    plt.savefig(os.path.join(args.wd, "results", "traces", figname))
 
     plt.gcf().clear()
     # plt.show()
@@ -427,20 +461,32 @@ def chromatogram(blast_position, offset, query_offset, ab1, alignment, taskname)
 def expasy(sequence):  # without initial methionine
     url = "https://web.expasy.org/cgi-bin/protparam/protparam"
     payload = {'sequence': sequence}
-    r = requests.get(url, params=payload)
+    try:
+        r = requests.get(url, params=payload)
+    except:
+        print("WARNING No internet connection! - Can't provide expasy")
+        return False
     return r.content
 
 
 def html_love(html_dict, alignment_list):
     html_dict["date_seqval"] = "%s-%s-%s" % (datetime.datetime.now().year, str(datetime.datetime.now().month).zfill(2),
                                              str(datetime.datetime.now().day).zfill(2))
+    """
+    removed stylesheets, didn't do anything. But if I had them...
+    html_dict["sib.css"]="file:///"+os.path.join(script_dir,"templates","css","sib_css","sib.css")
+    html_dict["sib_print.css"]="file:///"+os.path.join(script_dir,"templates","css","sib_css","sib_print.css")
+    html_dict["sib_ie6.css"]="file:///"+os.path.join(script_dir,"templates","css","sib_css","sib_ie6.css")
+    html_dict["base.css"]="file:///"+os.path.join(script_dir,"templates","css","base.css")
+    """
+
     goi = html_dict["goi"]  # unneccessary renaming. Can't be bothered right now
     html_dict["sequence"] = goi
     html_dict["len_sequence"] = len(goi)
 
     # Truncate expasy for replacing into template
     html_dict["expasy"] = ""
-    with open(os.path.join(os.getcwd(), "seq_align", "temp", "nomet_expasy.html"), "r") as exh:
+    with open(os.path.join(script_dir, "temp", "nomet_expasy.html"), "r") as exh:
         body = False
         for line in exh:
             if "User-provided sequence:</h2>" in line:
@@ -452,7 +498,7 @@ def html_love(html_dict, alignment_list):
                 body = False
 
     # Translate features to HTML
-    with open(os.path.join(os.getcwd(), "seq_align", "templates", "seqtemplate.txt"), "r") as fh:
+    with open(os.path.join(script_dir, "templates", "seqtemplate.txt"), "r") as fh:
         seqtemplate = fh.read()
 
     record = html_dict["record"]
@@ -484,7 +530,7 @@ def html_love(html_dict, alignment_list):
         layer = 0
         col = ["", ""]
         for i, position in enumerate(featurecomprehension):
-            if not labelcolor:
+            if not args.labelcolor:
                 if len(position) > 0:
                     col[0] = colors[position[0]]
                     if len(position) > 1:
@@ -514,8 +560,14 @@ def html_love(html_dict, alignment_list):
                     level[0] = position[0]
                     sequence_buffer = "%s<span style='font-weight:normal'><font color='%s'>%s" % (
                         sequence_buffer, col[0], goi[i])
+
                     annotation_buffer = "%s<span style='font-weight:normal'><font color='%s'> %s" % (
                         annotation_buffer, col[0], filtered_features[position[0]].qualifiers["label"][0])
+                    if args.annotation_area:
+                        annotation_buffer = "{} (nt {}-{})".format(
+                                annotation_buffer,
+                                int(filtered_features[position[0]].location.start + 1) - html_dict["start"],
+                                int(filtered_features[position[0]].location.end) - html_dict["start"])
                 level[1] = -1
                 continue
             elif len(position) >= 2:
@@ -529,6 +581,15 @@ def html_love(html_dict, alignment_list):
                             sequence_buffer, col[1], goi[i])
                         annotation_buffer = "%s<span style='font-weight:bold'><font color='%s'> %s" % (
                             annotation_buffer, col[1], filtered_features[position[1]].qualifiers["label"][0])
+                        if args.annotation_area:
+                            annotation_buffer = "{} (nt {}-{})".format(annotation_buffer,
+                                                                       (int(filtered_features[
+                                                                                position[1]].location.start + 1) -
+                                                                        html_dict["start"]),
+                                                                       (int(filtered_features[
+                                                                                position[1]].location.end) - html_dict[
+                                                                            "start"]))
+
                 else:
                     level[0], level[1] = position[0], position[1]
                     layer = layer + 1
@@ -536,8 +597,20 @@ def html_love(html_dict, alignment_list):
                         sequence_buffer, col[0], goi[i])
                     annotation_buffer = "%s<span style='font-weight:normal'><font color='%s'> %s" % (
                         annotation_buffer, col[0], filtered_features[position[0]].qualifiers["label"][0])
+                    if args.annotation_area:
+                        annotation_buffer = "{} (nt {}-{})".format(annotation_buffer, int(
+                                filtered_features[position[0]].location.start + 1) - html_dict["start"],
+                                                                   int(filtered_features[position[0]].location.end) -
+                                                                   html_dict["start"])
                     annotation_buffer = "%s<span style='font-weight:bold'><font color='%s'> %s" % (
                         annotation_buffer, col[1], filtered_features[position[1]].qualifiers["label"][0])
+                    if args.annotation_area:
+                        annotation_buffer = "{} (nt {}-{})".format(annotation_buffer,
+                                                                   (int(filtered_features[
+                                                                            position[1]].location.start + 1) -
+                                                                    html_dict["start"]),
+                                                                   (int(filtered_features[position[1]].location.end) -
+                                                                    html_dict["start"]))
             else:  # len(position)>2
                 sequence_buffer = sequence_buffer + goi[i]
         sequence_buffer = sequence_buffer + layer * "</font>"
@@ -560,7 +633,7 @@ def html_love(html_dict, alignment_list):
         translation_buffer = ""
         protein_buffer = ""
         for i, position in enumerate(featurecomprehension):
-            if not labelcolor:
+            if not args.labelcolor:
                 if len(position) > 0:
                     col[0] = colors[position[0]]
                     if len(position) > 1:
@@ -632,8 +705,10 @@ def html_love(html_dict, alignment_list):
         annotation_buffer = ""
 
     # Resolving template to result file
-    templatefile = os.path.join(os.getcwd(), "seq_align", "templates", "seq_val_raw_template.htm")
-    resultfile = os.path.join(os.getcwd(), html_dict["construct"] + html_dict["plasmid"] + ".htm")
+    templatefile = os.path.join(script_dir, "templates", "seq_val_raw_template.htm")
+    resultfile = os.path.join(args.wd, "results", "htm",
+                              "{}-{}_aSV.htm".format(html_dict["construct"], html_dict["clone"]))
+
     with open(templatefile, "r") as fh:
         with open(resultfile, "w+") as rh:
             for line in fh:
@@ -651,13 +726,31 @@ def html_love(html_dict, alignment_list):
                             seqformat = seqformat.replace("#SEQ_PRIMER#", ab1.annotations["abif_raw"]["CMNT1"])
                             seqformat = seqformat.replace("#SEQ_DATE#", ab1.annotations["abif_raw"]["RUND1"])
                             seqformat = seqformat.replace("#SEQ_READ#", str(ab1.seq))
-                            try:
-                                alignment_range = "%s-%s, %s-%s" % (
-                                    alignment["que_range"][0], traces[0]["position"], traces[-1]["position"],
-                                    alignment["que_range"][1])
-                                if alignment["que_range"][1] == len(goi):
-                                    alignment_range = alignment_range + " (end)"
-                            except:
+                            if not len(traces) == 0:
+                                if len(traces) == 1:
+                                    if alignment["que_range"][1] == len(goi):
+                                        alignment_range = "{}-{} (end) - mismatch: {}".format(alignment["que_range"][0],
+                                                                                              alignment["que_range"][1],
+                                                                                              traces[0]["position"])
+                                    else:
+                                        alignment_range = "{}-{} - mismatch: {}".format(alignment["que_range"][0],
+                                                                                        alignment["que_range"][1],
+                                                                                        traces[0]["position"])
+                                else:
+                                    position_dif = []
+                                    for index in range(0, len(traces) - 1):
+                                        position_dif.append(traces[index + 1]["position"] - traces[index]["position"])
+                                    max_index, max_value = max(enumerate(position_dif))
+                                    if alignment["que_range"][1] == len(goi):
+                                        alignment_range = "{}-{} (end) - mismatches: first {} last {} max span {}-{}"
+                                    else:
+                                        alignment_range = "{}-{} - mismatches: first {} last {} max span {}-{}"
+                                    alignment_range = alignment_range.format(
+                                            alignment["que_range"][0], alignment["que_range"][1], traces[0]["position"],
+                                            traces[-1]["position"], traces[max_index - 2]["position"],
+                                            traces[max_index - 1]["position"])
+
+                            else:
                                 alignment_range = "%s-%s" % (alignment["que_range"][0], alignment["que_range"][1])
                                 if alignment["que_range"][1] == len(goi):
                                     alignment_range = alignment_range + " (end)"
@@ -665,8 +758,10 @@ def html_love(html_dict, alignment_list):
                             seqformat = seqformat.replace("#BLAST#", alignment["html_tiny_blast"])
                             for trace in traces:
                                 seqformat = seqformat.replace("#TRACE#",
-                                                              "<img src='%s' width='300'> #TRACE#" % trace[
-                                                                  "figurefile"])
+                                                              "<img src='%s' width='300'> #TRACE#" % os.path.join("..",
+                                                                                                                  "traces",
+                                                                                                                  trace[
+                                                                                                                      "figurefile"]))
                                 seqformat = seqformat.replace("#TRACE_REG#", trace["mutation"] + " #TRACE_REG#")
                             if len(traces) == 0:
                                 seqformat = seqformat.replace("#TRACE_REG#", "None")
@@ -692,15 +787,49 @@ def html_love(html_dict, alignment_list):
                     else:
                         join = join + part
                 rh.write(join)
-    print("Task processed. Output %s \n" % resultfile)
+
+    return "{}-{}_aSV".format(html_dict["construct"], html_dict["clone"])
+
+
+def word_hate(html_file):
+    # https://stackoverflow.com/questions/4226095/html-to-doc-converter-in-python
+    word = win32com.client.Dispatch('Word.Application')
+    doc_path = '{}.doc'.format(os.path.abspath(os.path.join(args.wd, "results", "doc", html_file)))
+    htm_path = "{}.htm".format(os.path.abspath(os.path.join(args.wd, "results", "htm", html_file)))
+    # print("Converting {} to {}...".format(htm_path,doc_path))
+    doc = word.Documents.Add(htm_path)
+    doc.SaveAs(doc_path, FileFormat=0)
+    doc.Close()
+
+    word.Quit()
+
+    return doc_path
 
 if __name__ == '__main__':
-    username = "Your name"  # Put your name here
-    verbose = True  # Use this if you want extra output information
-    labelcolor = False  # Use this if you want the labels to be colored according to genbank file
-    colors = ["#e6194b", "#3cb44b", "#0082c8", "#f58231", "#911eb4", "#46f0f0", "#f032e6", "#d2f53c", "#fabebe",
-              "#008080", "#e6beff", "#aa6e28", "#fffac8", "#800000", "#aaffc3", "#808000", "#ffd8b1", "#000080",
-              "#808080"]  # colors = ["blue", "green", "red", "purple", "darkorange", "mustard", "teal", "brown", "cyan", "magenta",]  # redefine color scheme
-    # wd = os.getcwd()  # Use this to set directory. By default, terminal directory. Change e.g.
-    wd = "C:\\Users\\Arne Scheu\\Desktop\\qol"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-u", "--user")
+    parser.add_argument("-v", "--verbose", action="store_false", default=True)
+    parser.add_argument("-lc", "--labelcolor", action="store_true", default=False)
+    parser.add_argument("-w2d", "--win_convert_doc", action="store_true", default=False)
+    parser.add_argument("-wd", "--wd", default=os.getcwd())
+    parser.add_argument("-aa", "--annotation_area", action="store_true", default=False)
+    args = parser.parse_args()
+
+    if args.user == None:
+        args.user = getpass.getuser()
+        print("No username provided, using system user ({}). To provide username use -u 'username'".format(args.user))
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+
+    print(
+            "Arguments: -u(user) {} -lc(labelcolor) {} -w2d(win2doc) {} -v(verbose) {} -annotation_area {}\n\t-wd(directory) {}\n\tScript directory {}".format(
+                    args.user, args.labelcolor, args.win_convert_doc, args.verbose, args.annotation_area, args.wd,
+                    script_dir))
+
+    if platform.system() == "Windows" and args.win_convert_doc:
+        import win32com.client
+    elif args.win_convert_doc:
+        print("Automatic conversion to doc currently only avaliable in Windows - Complain to Arne")
+
+    colors = ["navy", "green", "orange", "red", "purple", "mint", "olive", "maroon", "coral", "brown",
+              "gold"]  # redefine color scheme
     master()
