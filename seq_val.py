@@ -1,6 +1,6 @@
 __author__ = "Arne Scheu"
-__date__ = "2018-06-07"
-__version__ = "1.0"
+__date__ = "2018-07-31"
+__version__ = "1.01"
 print("Automated sequence validation tool - Version {}:{} - {}".format(__version__, __date__, __author__))
 
 import argparse
@@ -747,22 +747,21 @@ def html_love(html_dict, alignment_list):
                                                                                         alignment["que_range"][1],
                                                                                         traces[0]["position"])
                                 else:
-                                    position_dif = traces[0] - alignment["que_range"][0]
+                                    position_dif = [traces[0]["position"] - alignment["que_range"][0]]
                                     for index in range(0, len(traces) - 1):
                                         position_dif.append(traces[index + 1]["position"] - traces[index]["position"])
-                                        position_dif.append(traces[-1] - alignment["que_range"][1])
+                                        position_dif.append(traces[-1]["position"] - alignment["que_range"][1])
                                         max_index, max_value = max(enumerate(position_dif))
                                     if alignment["que_range"][1] == len(goi):
                                         alignment_range = "{}-{} (end) - mismatches: first {} last {} max span {}-{}"
                                     else:
                                         alignment_range = "{}-{} - mismatches: first {} last {} max span {}-{}"
-                                    alignment_range = alignment_range.format(alignment["que_range"][0],
-                                                                             alignment["que_range"][1],
-                                                                             traces[0]["position"],
-                                                                             traces[-1]["position"],
-                                                                             traces[max_index - 3]["position"],
-                                                                             traces[max_index - 2]["position"])
-
+                                        alignment_range = alignment_range.format(alignment["que_range"][0],
+                                                                                 alignment["que_range"][1],
+                                                                                 traces[0]["position"],
+                                                                                 traces[-1]["position"],
+                                                                                 traces[max_index - 3]["position"],
+                                                                                 traces[max_index - 2]["position"])
                             else:
                                 alignment_range = "%s-%s" % (alignment["que_range"][0], alignment["que_range"][1])
                                 if alignment["que_range"][1] == len(goi):
