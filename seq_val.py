@@ -1,6 +1,6 @@
 __author__ = "Arne Scheu"
-__date__ = "2018-07-31"
-__version__ = "1.01"
+__date__ = "2018-06-15"
+__version__ = "1.01b"
 print("Automated sequence validation tool - Version {}:{} - {}".format(__version__, __date__, __author__))
 
 import argparse
@@ -23,7 +23,6 @@ try:
 except NameError:  # python2
     FileNotFoundError = IOError
     print("WARNING defined FileNotFoundError as IOError. You are likely running python2")
-
 
 def master():
     if not os.path.exists(os.path.join(args.wd, "results", "traces")):
@@ -96,7 +95,6 @@ def master():
             except Exception as e:
                 print("Failed to convert to word file. Try closing word first. Exception {}".format(e))
     print("All tasks complete.")
-
 
 def define_task(taskfile):
     task_list = []
@@ -328,7 +326,6 @@ def chromatogram(blast_position, offset, query_offset, ab1, alignment, taskname)
         trace[c] = ab1.annotations['abif_raw'][c]
     clr = {"DATA9": "black", "DATA10": "green", "DATA11": "red", "DATA12": "blue"}  # G,A,T,C
 
-    # TODO threshold for traces
     # TODO define view area a bit more flexible. Hardcoded numbers right now
     ymax = 0  # autoscaling
     for channel in "DATA9", "DATA10", "DATA11", "DATA12":  # Not sure why I did this instead of plotting directly
@@ -416,10 +413,6 @@ def chromatogram(blast_position, offset, query_offset, ab1, alignment, taskname)
         if ticks != alignment["seq_reconstituted"][len(alignment["seq_reconstituted"]) - relative_position - 11:len(
                 alignment["seq_reconstituted"]) - relative_position + 10]:
             print("~~CONGRATULATIONS~~, this should never happen! Please talk to Arne")
-            # TODO in output, this will produce trace which is missing a "QUERY" sequence on top x-axis
-            print(ticks, alignment["seq_reconstituted"][
-                         len(alignment["seq_reconstituted"]) - relative_position - 11:len(
-                                 alignment["seq_reconstituted"]) - relative_position + 10])
     else:
         ticks = alignment["seq_reconstituted"][relative_position - 10:relative_position + 11]
     # if len(ticks)<21: print(ticks, "Short trace. Extending by", 21-len(ticks))
@@ -625,17 +618,14 @@ def html_love(html_dict, alignment_list):
 
         # Bugfix extends features to multiples of three, to color SNPs. In principle, this makes the checks below redundand
         for index in range(0, len(featurecomprehension), 3):
-            if index + 2 < len(featurecomprehension):
-                buffer = []
-                for comprehension in featurecomprehension[index:index + 2]:
-                    for element in comprehension:
-                        if element not in buffer:
-                            buffer.append(element)
-                featurecomprehension[index] = buffer
-                featurecomprehension[index + 1] = buffer
-                featurecomprehension[index + 2] = buffer
-            else:
-                print("\tWARNING: FEATURE TRIPLET WOULD EXTEND BEYOND GENE")
+            buffer = []
+            for comprehension in featurecomprehension[index:index + 2]:
+                for element in comprehension:
+                    if element not in buffer:
+                        buffer.append(element)
+            featurecomprehension[index] = buffer
+            featurecomprehension[index + 1] = buffer
+            featurecomprehension[index + 2] = buffer
 
         # labeling of protein sequence
         level = [-1, -1]
@@ -747,21 +737,19 @@ def html_love(html_dict, alignment_list):
                                                                                         alignment["que_range"][1],
                                                                                         traces[0]["position"])
                                 else:
-                                    position_dif = [traces[0]["position"] - alignment["que_range"][0]]
+                                    position_dif = []
                                     for index in range(0, len(traces) - 1):
                                         position_dif.append(traces[index + 1]["position"] - traces[index]["position"])
-                                        position_dif.append(traces[-1]["position"] - alignment["que_range"][1])
-                                        max_index, max_value = max(enumerate(position_dif))
+                                    max_index, max_value = max(enumerate(position_dif))
                                     if alignment["que_range"][1] == len(goi):
                                         alignment_range = "{}-{} (end) - mismatches: first {} last {} max span {}-{}"
                                     else:
                                         alignment_range = "{}-{} - mismatches: first {} last {} max span {}-{}"
-                                        alignment_range = alignment_range.format(alignment["que_range"][0],
-                                                                                 alignment["que_range"][1],
-                                                                                 traces[0]["position"],
-                                                                                 traces[-1]["position"],
-                                                                                 traces[max_index - 3]["position"],
-                                                                                 traces[max_index - 2]["position"])
+                                    alignment_range = alignment_range.format(
+                                            alignment["que_range"][0], alignment["que_range"][1], traces[0]["position"],
+                                            traces[-1]["position"], traces[max_index - 2]["position"],
+                                            traces[max_index - 1]["position"])
+
                             else:
                                 alignment_range = "%s-%s" % (alignment["que_range"][0], alignment["que_range"][1])
                                 if alignment["que_range"][1] == len(goi):
@@ -802,7 +790,6 @@ def html_love(html_dict, alignment_list):
 
     return "{}-{}_aSV".format(html_dict["construct"], html_dict["clone"])
 
-
 def word_hate(html_file):
     # https://stackoverflow.com/questions/4226095/html-to-doc-converter-in-python
     word = win32com.client.Dispatch('Word.Application')
@@ -816,7 +803,6 @@ def word_hate(html_file):
     word.Quit()
 
     return doc_path
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -843,15 +829,6 @@ if __name__ == '__main__':
     elif args.win_convert_doc:
         print("Automatic conversion to doc currently only avaliable in Windows - Complain to Arne")
 
-    colors = ["navy", "green", "orange", "red", "purple", "olive", "maroon", "coral", "brown",
+    colors = ["blue", "green", "orange", "red", "purple", "olive", "maroon", "coral", "brown",
               "gold"]  # redefine color scheme
     master()
-
-# TODO bugs: pAS008 validation T60N has no Query in trace
-# TODO bugs: bc I cut off query according to what is given, prone to not align if edges are poor
-# TODO include backbone name in Plasmid output (i.e. pET28a His6-ThrSite-SpyTag-C-LSPM-CTag = pAS024 clone GA048-1)
-# TODO max span doesn't give#  correct output in published version; fixed since?
-# TODO format break and block for description
-# TODO include mutagenesis key -> bold, underlined
-# TODO include skipped traces in comment or somehow else in file
-# TODO add second x-axis again which has sequencing DATA real position. y-axis with query position
