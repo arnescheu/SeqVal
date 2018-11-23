@@ -5,37 +5,37 @@
 
 <div class=WordSection1>
     <p class=MsoNormal><b><span lang=EN-GB style='font-size:12.0pt;line-height:
-107%;font-family:"Times New Roman",serif;color:red'>***AUTOMATICALLY GENERATED. PLEASE CONFIRM***</span></b></p>
+107%;font-family:"Times New Roman",serif;color:red'>--- please confirm automatically generated report ---</span></b></p>
 
 
     <p class=MsoNormal><b><span lang=EN-GB style='font-size:14.0pt;line-height:
-107%;font-family:"Times New Roman",serif'>Howarth lab sequence validation</span></b></p>
+107%;font-family:"Times New Roman",serif'>Sequence validation</span></b></p>
 
     <p class=MsoNormal><span lang=EN-GB style='font-size:12.0pt;line-height:107%;
-font-family:"Times New Roman",serif'>Your name: #user#<br>
-Gene: #gene#</span></p>
+font-family:"Times New Roman",serif'>Your name: {user}<br>
+Gene: {gene}</span></p>
 
     <p class=MsoNormal><span lang=EN-GB style='font-size:12.0pt;line-height:107%;
 font-family:"Times New Roman",serif'>Spell out abbreviations and in one
 sentence explain why made:<br>
-#description#</span></p>
+{description}</span></p>
 
     <p class=MsoNormal><span lang=EN-GB style='font-size:12.0pt;line-height:107%;
-font-family:"Times New Roman",serif'>Plasmid (including clone no.): #construct#
-- clone #clone#<br>
-Date plasmid first purified: #date_purified#<br>
-Date sequence validation: #date_seqval#</span></p>
+font-family:"Times New Roman",serif'>Plasmid (including clone no.): {construct}
+- clone {clone}<br>
+Date plasmid first purified: {date_purified}<br>
+Date sequence validation: {date_seqval}</span></p>
 
     <p class=MsoNormal><span lang=EN-GB style='font-size:12.0pt;line-height:107%;
 font-family:"Times New Roman",serif'>Predicted nucleotide sequence (from ATG to
-stop codon, do not have gaps in sequence every 10 nt, font size at least 10):</span></p>
+stop codon):</span></p>
 
     <p class=MsoNormal style='margin-bottom:0cm;margin-bottom:.0001pt'><span
-            lang=EN-GB style='font-size:9.0pt;line-height:107%;font-family:"Courier New"'>#sequence#</span></p>
+            lang=EN-GB style='font-size:10.0pt;line-height:107%;font-family:"Courier New"'>{sequence}</span></p>
 
     <p class=MsoNormal><span lang=EN-GB style='font-size:12.0pt;line-height:107%;
 font-family:"Times New Roman",serif'>No. of nucleotides (including stop codon):
-#len_sequence#</span></p>
+{len_sequence}</span></p>
 
     <p class=MsoNormal><span lang=EN-GB style='font-size:12.0pt;line-height:107%;
 font-family:"Times New Roman",serif'>Predicted amino acid sequence from
@@ -44,10 +44,10 @@ mutated residues; please colour relevant domains or peptide tags; do not have
 gaps in sequence, include a hyphen to indicate the stop codon)</span></p>
 
     <p class=MsoNormal style='margin-bottom:0cm;margin-bottom:.0001pt'><span
-            lang=EN-GB style='font-size:9.0pt;line-height:107%;font-family:"Courier New"'>#PROTEIN#</span></p>
+            lang=EN-GB style='font-size:10.0pt;line-height:107%;font-family:"Courier New"'>{PROTEIN}</span></p>
 
     <p class=MsoNormal><span lang=EN-GB style='font-size:12.0pt;line-height:107%;
-font-family:"Times New Roman",serif;color:black'>#ANNOTATION#</span></p>
+font-family:"Times New Roman",serif;color:black'>{ANNOTATION}</span></p>
 
     <p class=MsoNormal><span lang=EN-GB style='font-size:12.0pt;line-height:107%;
 font-family:"Times New Roman",serif'>&nbsp;</span></p>
@@ -58,19 +58,19 @@ font-family:"Times New Roman",serif'>Paste in full ProtParam analysis (remove in
 </p>
 </div>
 
-#expasy#
+{expasy}
 
 <div class=WordSection2>
     <p class=MsoNormal align=center style='text-align:center'><b><span lang=EN-GB
                                                                        style='font-size:12.0pt;line-height:107%;font-family:"Times New Roman",serif;color:black'>Sequencing
 results</span></b></p>
 
-    #seqtemplate#
+    {seqtemplate}
 
     <p class=MsoNormal><span lang=EN-GB style='font-size:12.0pt;line-height:107%;
-font-family:"Times New Roman",serif'>Summary of all reads: <br>&emsp;#SEQSUM#</span>
+font-family:"Times New Roman",serif'>Summary of all reads: <br>&emsp;{seqval_summary}</span></br>
         <span lang=EN-GB style='font-size:12.0pt;
-line-height:107%;font-family:"Times New Roman",serif;color:red'>***PLEASE INTERPRET AREA COVERED***</span></p>
+line-height:107%;font-family:"Times New Roman",serif;color:red'>--- please interpret validated areas ---</span></p>
 
     <p class=MsoNormal><span lang=EN-GB style='font-size:12.0pt;line-height:107%;
 font-family:"Times New Roman",serif'>&nbsp;</span></p>
@@ -78,7 +78,7 @@ font-family:"Times New Roman",serif'>&nbsp;</span></p>
     <p class=MsoNormal><i><span lang=EN-GB style='font-size:12.0pt;line-height:
 107%;font-family:"Times New Roman",serif'>Other comments:</span></i><span
             lang=EN-GB style='font-size:12.0pt;line-height:107%;font-family:"Times New Roman",serif'>
-#comments#</span></p>
+{comments}</span></p>
 
 </div>
 
