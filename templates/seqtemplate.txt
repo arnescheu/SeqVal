@@ -1,29 +1,30 @@
 <!--SEQTEMPLATE START-->
 <p class=MsoNormal><span lang=EN-GB style='font-size:12.0pt;line-height:107%;
-font-family:"Times New Roman",serif'>Source: #SEQ_NAME#<br>
-Primer: #SEQ_PRIMER#<br>
-Date: #SEQ_DATE#<br>
+font-family:"Times New Roman",serif'>Source: {SEQ_NAME}<br>
+Primer: {SEQ_PRIMER}<br>
+Date: {SEQ_DATE}<br>
 Read:
 <p class=MsoNormal style='margin-bottom:0cm;margin-bottom:.0001pt'><span
-lang=EN-GB style='font-size:9.0pt;line-height:107%;font-family:"Courier New"'>#SEQ_READ#</span></p>
+lang=EN-GB style='font-size:10.0pt;line-height:107%;font-family:"Courier New"'>{SEQ_READ}</span></p>
 
 <p class=MsoNormal><span lang=EN-GB style='font-size:12.0pt;line-height:107%;
 font-family:"Times New Roman",serif'>Alignment using BLAST (pairwise with dots
 for identities, so N is shown in red):</span></p>
 
 <p class=MsoNormal style='margin-bottom:0cm;margin-bottom:.0001pt'><span
-lang=EN-GB style='font-size:9.0pt;line-height:107%;font-family:"Courier New"'>#BLAST#</span></p>
+lang=EN-GB style='font-size:10.0pt;line-height:107%;font-family:"Courier New"'>{BLAST}</span></p>
 
 <p class=MsoNormal style='margin-bottom:0cm;margin-bottom:.0001pt'><span
-lang=EN-GB style='font-size:9.0pt;line-height:107%;font-family:"Courier New"'>&nbsp;</span></p>
+lang=EN-GB style='font-size:10.0pt;line-height:107%;font-family:"Courier New"'>&nbsp;</span></p>
 
 <p class=MsoNormal><span lang=EN-GB style='font-size:12.0pt;line-height:107%;
-font-family:"Times New Roman",serif'>Nucleotides validated by this read: #BLAST_VAL#</span></p>
- <span lang=EN-GB style='font-size:12.0pt;
-line-height:107%;font-family:"Times New Roman",serif;color:red'>***PLEASE INTERPRET AREA COVERED***</span></p>
+font-family:"Times New Roman",serif'>Nucleotides validated by this read: {BLAST_VAL}</span></p>
 
 <p class=MsoNormal><span lang=EN-GB style='font-size:12.0pt;line-height:107%;
 font-family:"Times New Roman",serif'>Image of ab1 of any nucleotides in question: #TRACE_REG#</span></p>
+
+ <span lang=EN-GB style='font-size:12.0pt;
+line-height:107%;font-family:"Times New Roman",serif;color:red'>--- please interpret validated area ---</span></p>
 
 <p class=MsoNormal><span lang=EN-GB style='font-size:12.0pt;line-height:107%;
 font-family:"Times New Roman",serif'>#TRACE#</span></p>
