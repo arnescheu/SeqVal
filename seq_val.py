@@ -1,6 +1,6 @@
 __author__ = "Arne HA Scheu @ github.com/arnescheu"
-__date__ = "2018-11-23"
-__version__ = "1.02"
+__date__ = "2019-03-29"
+__version__ = "1.021"
 print("SeqVal v{}:{} - Automated sequence validation tool by {}\n".format(__version__, __date__, __author__))
 
 import argparse
@@ -24,6 +24,9 @@ except NameError:  # python2
     FileNotFoundError = IOError
     print("WARNING defined FileNotFoundError as IOError. You are likely running python2")
 
+
+# TODO define signal sequences, e.g. tPA, to be cut from ExPASY
+
 def master():
     if not os.path.exists(os.path.join(args.wd, "temp")):
         os.makedirs(os.path.join(args.wd, "temp"))
@@ -40,13 +43,17 @@ def master():
 
         # Defining gene of interest based on genbank and region or sequence field.
         task["goi"], task["start"], task["record"] = define_goi(task)
+        if not task["goi"]:
+            print("Task skipped. No output generated.\n")
+            continue
+
         if len(task["goi"]) % 3 != 0:
             print("WARNING defined region not multiple of 3! Likely bad output, check %s" % str(task))
 
         # define the sequence traces belonging to gb file
         ab1_list = []
         for key in task:
-            if "sequencing" in key:  # sequencing1, sequencing2,...
+            if "sequencing" in key:  # sequencing1, sequencing2,... #TODO throws error for empty column
                 if task[key] is not "":
                     split = task[key].split(";")  # sequencing filename1;filename2 also works
                     for filename in split:
@@ -77,8 +84,18 @@ def master():
 
         # Create expasy, removing first residue ([3:]
         # TODO needs an argument to keep methionine, e.g. for mammalian expression
-        with open(os.path.join(script_dir, "temp", "nomet_expasy.html"), "w+") as ex:
+        if task["mam_exp"] == "T":
+            print("\tSubmitting ExPASY for mammalian expression")
+            expasy_result = expasy(task["goi"].translate(to_stop=True))
+        elif task["mam_exp"] == "F":
+            print("\tSubmitting ExPASY for bacterial expression, no initiating methionine")
             expasy_result = expasy(task["goi"][3:].translate(to_stop=True))
+        else:
+            print(
+                "\tWARNING mammalian expression not defined. DEFAULT to remove initiating met for bacterial expression.")
+            expasy_result = expasy(task["goi"][3:].translate(to_stop=True))
+
+        with open(os.path.join(script_dir, "temp", "expasy.html"), "w+") as ex:
             if expasy_result:
                 ex.write(expasy_result.decode("utf-8"))
             else:
@@ -87,7 +104,7 @@ def master():
                 # A bit shoddy. This later gets recognised as the 'body' of the expasy file and inserted into final file
         # Truncate expasy for replacing into template
         task["expasy"] = ""
-        with open(os.path.join(script_dir, "temp", "nomet_expasy.html"), "r") as exh:
+        with open(os.path.join(script_dir, "temp", "expasy.html"), "r") as exh:
             body = False
             for line in exh:
                 if "User-provided sequence:</h2>" in line:
@@ -159,11 +176,12 @@ def define_goi(task):  # not bothering with -1 strand
             else:
                 # TODO if permissive: return False
                 raise FileNotFoundError(task["genbank_path"] + " not found!")
-    elif not task["sequence"] is None:
-        print("WARNING no genbank provided. DEFAULT to sequence provided")
+    elif task["sequence"]:
+        print("\tWARNING no genbank provided. DEFAULT to sequence provided")
         return (Seq(task["sequence"]), 0, False)
     else:
-        raise Exception("Task lacking both genbank with region and sequence.")
+        print("\tWARNING task provided with neither genbank file nor sequence information. Skipping task...")
+        return (False, 0, False)
 
 """alternative to nblast in construction. Might be easier to just use pairwise2
 from Bio.Blast import NCBIWWW
@@ -343,6 +361,7 @@ def chromatogram(blast_position, offset, query_offset, ab1, alignment, taskname)
     ymax = 0  # autoscaling
     for channel in "DATA9", "DATA10", "DATA11", "DATA12":  # Not sure why I did this instead of plotting directly
         ymax2 = max(ab1.annotations['abif_raw'][channel][readposition - 200:readposition + 200])
+        # TODO throws error for GA080-5 Seq892 (because sequence fully contained in gene?) -> No, because it goes outside?
         if ymax2 > ymax:
             ymax = ymax2  # Maximum channel value
         plt.plot(ab1.annotations['abif_raw'][channel], color=clr[channel])
@@ -353,8 +372,8 @@ def chromatogram(blast_position, offset, query_offset, ab1, alignment, taskname)
     try:
         xmax = ab1.annotations["abif_raw"]["PLOC1"][absolute_position + 10]
     except IndexError:
-        print("WARNING reached end of chromatogram, DEFAULT to maximum. UNTESTED, please show to Arne.")
-        xmax = len(ab1.annotations["abif_raw"]["DATA9"])
+        print("\t\tWARNING reached end of chromatogram, DEFAULT xmax to maximum. UNTESTED, please show to Arne.")
+        xmax = len(ab1.annotations["abif_raw"]["PLOC1"])
 
     # plt.title("Misaligned " + alignment["query"][blast_position] + str(mismatch_number) + alignment["sequence"][
     #    blast_position] + ", ab1" + str(
@@ -362,6 +381,7 @@ def chromatogram(blast_position, offset, query_offset, ab1, alignment, taskname)
 
     plt.title(alignment["query"][blast_position] + str(mismatch_number) + alignment["sequence"][blast_position], y=1.15)
 
+    print("\t\t\t", xmin, xmax, alignment["orientation"])
     if alignment["orientation"] == 1:
         plt.xlim(xmin, xmax)  # For some reason, setting this again makes the ticks place correctly
     else:
@@ -395,7 +415,28 @@ def chromatogram(blast_position, offset, query_offset, ab1, alignment, taskname)
     # Adding pointers on 2nd axis
     # https://stackoverflow.com/questions/27728312/matplotlib-ticks-not-align-with-data-point
     visible_ticks = []
-    for r in range(absolute_position - 10, absolute_position + 11, 1):
+
+    # fix for tuple index error at end of chromatogram
+    if absolute_position + 11 > len(ab1.annotations["abif_raw"]["PLOC1"]):
+        print("\t\tWARNING reached end of chromatogram, DEFAULT to maximum. UNTESTED, please show to Arne.")
+        print("\t\tDEBUG absolute_postion", absolute_position, "len(ab1.annotations['abif_raw']['PLOC1'])",
+              len(ab1.annotations["abif_raw"]["PLOC1"]))
+
+        r_range = range(absolute_position - 10, len(ab1.annotations["abif_raw"]["PLOC1"]), 1)
+        if absolute_position - 10 < 0:
+            print(
+                "\t\tWARNING chromatogram too early to represent default focus, DEFAULT to 0. UNTESTED, please show to Arne. This sequence is either really short or something is really wrong...")
+            r_range = range(0, len(ab1.annotations["abif_raw"]["PLOC1"]) - 1, 1)
+        print("\t\tDEBUG adjusted r_range", r_range)
+    elif absolute_position - 10 < 0:
+        print(
+            "\t\tWARNING chromatogram too early to represent default focus, DEFAULT to 0. UNTESTED, please show to Arne.")
+        r_range = range(0, absolute_position + 11, 1)
+        print("\t\tDEBUG adjusted r_range", r_range)
+    else:
+        r_range = range(absolute_position - 10, absolute_position + 11, 1)
+
+    for r in r_range:  #before: for r in range(absolute_position - 10, absolute_position + 11, 1):
         visible_ticks.append(int(ab1.annotations["abif_raw"]["PLOC1"][r]))
     ax2.set_xticks(visible_ticks)
     ax1.set_xticks(visible_ticks)
@@ -425,11 +466,12 @@ def chromatogram(blast_position, offset, query_offset, ab1, alignment, taskname)
         # A piece of control
         if ticks != alignment["seq_reconstituted"][len(alignment["seq_reconstituted"]) - relative_position - 11:len(
                 alignment["seq_reconstituted"]) - relative_position + 10]:
-            print("~~CONGRATULATIONS~~, this should never happen! Please talk to Arne")
+            print("\t\tWARNING Something went wrong during trace alignment. Please talk to Arne")
     else:
         ticks = alignment["seq_reconstituted"][relative_position - 10:relative_position + 11]
     # if len(ticks)<21: print(ticks, "Short trace. Extending by", 21-len(ticks))
-    while len(ticks) < 21:
+
+    while len(ticks) < 21 and ((absolute_position + len(ticks) - 10) < len(ab1.annotations["abif_raw"]["PBAS1"])):
         ticks = ticks + str(ab1.annotations["abif_raw"]["PBAS1"][absolute_position + (len(ticks)) - 10])
     if args.verbose:
         print("\t\tPosition %s chromatogram %s ab1 %s task %s" % (mutation.ljust(6, " "), ticks, taskname, ab1.name))
@@ -823,3 +865,7 @@ if __name__ == '__main__':
     colors = ["blue", "green", "orange", "red", "purple", "olive", "maroon", "coral", "brown",
               "gold"]  # redefine color scheme
     master()
+
+# TODO Max span calculation is still incorrect, e.g. 203-1443 (end) - mismatches: first 217 last 377 max span 0-217
+# TODO results should always be in seqval folder
+# TODO wd should be able to point to different dir for gb and ab1
