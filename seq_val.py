@@ -1,6 +1,6 @@
 __author__ = "Arne HA Scheu @ github.com/arnescheu"
-__date__ = "2019-03-29"
-__version__ = "1.021"
+__date__ = "2019-04-12"
+__version__ = "1.022"
 print("SeqVal v{}:{} - Automated sequence validation tool by {}\n".format(__version__, __date__, __author__))
 
 import argparse
@@ -28,8 +28,8 @@ except NameError:  # python2
 # TODO define signal sequences, e.g. tPA, to be cut from ExPASY
 
 def master():
-    if not os.path.exists(os.path.join(args.wd, "temp")):
-        os.makedirs(os.path.join(args.wd, "temp"))
+    # if not os.path.exists(os.path.join(args.wd, "temp")): #TODO resolve correct wd for both temp folder and blast
+    #    os.makedirs(os.path.join(args.wd, "temp"))
     if not os.path.exists(os.path.join(args.wd, "results", "traces")):
         os.makedirs(os.path.join(args.wd, "results", "traces"))
     if not os.path.exists(os.path.join(args.wd, "results", "htm")):
@@ -381,7 +381,7 @@ def chromatogram(blast_position, offset, query_offset, ab1, alignment, taskname)
 
     plt.title(alignment["query"][blast_position] + str(mismatch_number) + alignment["sequence"][blast_position], y=1.15)
 
-    print("\t\t\t", xmin, xmax, alignment["orientation"])
+    #print("\t\t\t",xmin, xmax, alignment["orientation"])
     if alignment["orientation"] == 1:
         plt.xlim(xmin, xmax)  # For some reason, setting this again makes the ticks place correctly
     else:
@@ -431,10 +431,11 @@ def chromatogram(blast_position, offset, query_offset, ab1, alignment, taskname)
     elif absolute_position - 10 < 0:
         print(
             "\t\tWARNING chromatogram too early to represent default focus, DEFAULT to 0. UNTESTED, please show to Arne.")
-        r_range = range(0, absolute_position + 11, 1)
+        r_range = range(0, absolute_postion + 11, 1)
         print("\t\tDEBUG adjusted r_range", r_range)
     else:
         r_range = range(absolute_position - 10, absolute_position + 11, 1)
+
 
     for r in r_range:  #before: for r in range(absolute_position - 10, absolute_position + 11, 1):
         visible_ticks.append(int(ab1.annotations["abif_raw"]["PLOC1"][r]))
@@ -739,7 +740,7 @@ def html_love(html_dict, alignment_list):
     # Resolving template to result file
     templatefile = os.path.join(script_dir, "templates", "seq_val_raw_template.htm")
     resultfile = os.path.join(args.wd, "results", "htm",
-                              "{}-{}_aSV.htm".format(html_dict["construct"], html_dict["clone"]))
+                              "{construct} - {gene} - ASV.htm".format(**html_dict))
 
     # In code as this has to resolve multiple times. Could be own function
     seqbuffer = ""
@@ -868,4 +869,4 @@ if __name__ == '__main__':
 
 # TODO Max span calculation is still incorrect, e.g. 203-1443 (end) - mismatches: first 217 last 377 max span 0-217
 # TODO results should always be in seqval folder
-# TODO wd should be able to point to different dir for gb and ab1
+#TODO wd should be able to point to different dir for gb and ab1
