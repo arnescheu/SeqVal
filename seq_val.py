@@ -1,6 +1,6 @@
 __author__ = "Arne HA Scheu @ github.com/arnescheu"
-__date__ = "2019-04-12"
-__version__ = "1.022"
+__date__ = "2019-07-22"
+__version__ = "1.023"
 print("SeqVal v{}:{} - Automated sequence validation tool by {}\n".format(__version__, __date__, __author__))
 
 import argparse
@@ -118,8 +118,9 @@ def master():
 
         # Compiles all previous data
         task["user"] = args.user
-        html_file = html_love(task, alignment_list)
-        print("Task processed. Check {}.htm \n".format(os.path.join(args.wd, "results", "htm", html_file)))
+        result_file = html_love(task, alignment_list)
+
+        print("Task processed. Check '{}'\n".format(result_file))
         if platform.system() == "Windows" and args.win_convert_doc:
             print("Experimental, trying to convert {}.htm to word".format(html_file))
             try:
@@ -129,6 +130,7 @@ def master():
             except Exception as e:
                 print("Failed to convert to word file. Try closing word first. Exception {}".format(e))
     print("All tasks complete.")
+
 
 def define_task(taskfile):
     task_list = []
@@ -162,7 +164,7 @@ def define_goi(task):  # not bothering with -1 strand
             for feature in record.features:
                 if "GOI" in feature.qualifiers["label"]:
                     start, end = int(feature.location.start), int(
-                            feature.location.end)  # location.start is already adjusted to index, -1
+                        feature.location.end)  # location.start is already adjusted to index, -1
                     if args.verbose:
                         print("\tDefining region by GOI label in genbank: Start {} end {}".format(start + 1, end))
                     return (record.seq[start:end], start, record)
@@ -183,6 +185,7 @@ def define_goi(task):  # not bothering with -1 strand
         print("\tWARNING task provided with neither genbank file nor sequence information. Skipping task...")
         return (False, 0, False)
 
+
 """alternative to nblast in construction. Might be easier to just use pairwise2
 from Bio.Blast import NCBIWWW
 def online_nblast(goi,ab1_path):
@@ -194,6 +197,7 @@ def online_nblast(goi,ab1_path):
         fh.write(result_handle.read())
     return True
 """
+
 
 def local_nblast(goi, seqfile):  # better to switch to pairwise2 instead of nblast?
     query_temp = os.path.join(script_dir, "temp", "BLAST_query.fa")
@@ -209,7 +213,7 @@ def local_nblast(goi, seqfile):  # better to switch to pairwise2 instead of nbla
     except FileNotFoundError:
         return seqfile + " not found. Skipping BLAST."
 
-    # resultfile location
+    # result_path location
     out_temp = os.path.join(script_dir, "temp", "blast_temp.txt")
     # execute nblast using installation
     command = (
@@ -282,8 +286,8 @@ def interpret_blast(
                 subject["misalign"].append(i)
         style = "<font color='red'>"
         subject["html_tiny_blast"] = subject["tiny_blast"].replace("\n", "<br>").replace(" ", "&nbsp;").replace(
-                "#style#",
-                style)
+            "#style#",
+            style)
 
     if subject["seq_range"][0] < subject["seq_range"][1]:
         subject["orientation"] = 1
@@ -381,7 +385,7 @@ def chromatogram(blast_position, offset, query_offset, ab1, alignment, taskname)
 
     plt.title(alignment["query"][blast_position] + str(mismatch_number) + alignment["sequence"][blast_position], y=1.15)
 
-    #print("\t\t\t",xmin, xmax, alignment["orientation"])
+    # print("\t\t\t",xmin, xmax, alignment["orientation"])
     if alignment["orientation"] == 1:
         plt.xlim(xmin, xmax)  # For some reason, setting this again makes the ticks place correctly
     else:
@@ -436,8 +440,7 @@ def chromatogram(blast_position, offset, query_offset, ab1, alignment, taskname)
     else:
         r_range = range(absolute_position - 10, absolute_position + 11, 1)
 
-
-    for r in r_range:  #before: for r in range(absolute_position - 10, absolute_position + 11, 1):
+    for r in r_range:  # before: for r in range(absolute_position - 10, absolute_position + 11, 1):
         visible_ticks.append(int(ab1.annotations["abif_raw"]["PLOC1"][r]))
     ax2.set_xticks(visible_ticks)
     ax1.set_xticks(visible_ticks)
@@ -523,6 +526,7 @@ def expasy(sequence):  # without initial methionine
         print("WARNING No internet connection! - Can't provide expasy")
         return False
     return r.content
+
 
 def html_love(html_dict, alignment_list):
     html_dict["date_seqval"] = "%s-%s-%s" % (datetime.datetime.now().year, str(datetime.datetime.now().month).zfill(2),
@@ -738,12 +742,12 @@ def html_love(html_dict, alignment_list):
         annotation_buffer = ""
 
     # Resolving template to result file
-    templatefile = os.path.join(script_dir, "templates", "seq_val_raw_template.htm")
-    resultfile = os.path.join(args.wd, "results", "htm",
-                              "{construct} - {gene} - ASV.htm".format(**html_dict))
+    template_path = os.path.join(script_dir, "templates", "seq_val_raw_template.htm")
+    result_file = "{construct} = {{{gene}}}-{backbone} - ASV.htm".format(**html_dict)
+    result_path = os.path.join(args.wd, "results", "htm", result_file)
 
     # In code as this has to resolve multiple times. Could be own function
-    seqbuffer = ""
+    summary_buffer = ""
     html_dict["seqtemplate"] = ""
     for element in alignment_list:
         ab1 = element["ab1"]
@@ -806,23 +810,26 @@ def html_love(html_dict, alignment_list):
         else:
             seqformat = seqformat.replace("#TRACE_REG#", "")
         seqformat = seqformat.replace("#TRACE#", "")
-        seqbuffer = seqbuffer + ab1.annotations["abif_raw"][
+        summary_buffer = summary_buffer + ab1.annotations["abif_raw"][
             "CMNT1"] + " gives " + alignment_range + "<br>&emsp;"
         seqformat = seqformat.format(**seq_dic)
         html_dict["seqtemplate"] = html_dict["seqtemplate"] + seqformat
 
-    html_dict["seqval_summary"] = seqbuffer
+    html_dict["seqval_summary"] = summary_buffer
     html_dict["sequence"] = sequence_buffer
     html_dict["PROTEIN"] = protein_buffer
     html_dict["ANNOTATION"] = annotation_buffer
 
-    with open(templatefile, "r") as fh:
-        with open(resultfile, "w+") as rh:
+    with open(template_path, "r") as fh:
+        with open(result_path, "w+") as rh:
             for line in fh:
                 line = line.format(**html_dict)
                 rh.write(line)
 
-    return "{}-{}_aSV".format(html_dict["construct"], html_dict["clone"])
+    return result_file
+
+
+# "{}-{}_aSV".format(html_dict["construct"], html_dict["clone"])
 
 def word_hate(html_file):
     # https://stackoverflow.com/questions/4226095/html-to-doc-converter-in-python
@@ -837,6 +844,7 @@ def word_hate(html_file):
     word.Quit()
 
     return doc_path
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -855,8 +863,8 @@ if __name__ == '__main__':
 
     print(
         "Arguments: -u(user) {} -lc(labelcolor) {} -w2d(win2doc) {} -v(verbose) {} -annotation_area {}\n\t-wd(directory) {}\n\tScript directory {}\n".format(
-                    args.user, args.labelcolor, args.win_convert_doc, args.verbose, args.annotation_area, args.wd,
-                    script_dir))
+            args.user, args.labelcolor, args.win_convert_doc, args.verbose, args.annotation_area, args.wd,
+            script_dir))
 
     if platform.system() == "Windows" and args.win_convert_doc:
         import win32com.client
@@ -869,4 +877,4 @@ if __name__ == '__main__':
 
 # TODO Max span calculation is still incorrect, e.g. 203-1443 (end) - mismatches: first 217 last 377 max span 0-217
 # TODO results should always be in seqval folder
-#TODO wd should be able to point to different dir for gb and ab1
+# TODO wd should be able to point to different dir for gb and ab1
