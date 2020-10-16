@@ -1,8 +1,12 @@
 __author__ = "Arne HA Scheu @ github.com/arnescheu"
-__date__ = "2019-07-22"
-__version__ = "1.023"
+__date__ = "2019-09-05"
+__version__ = "1.024"
 print("SeqVal v{}:{} - Automated sequence validation tool by {}\n".format(__version__, __date__, __author__))
-
+#TODO: Maxspan lower number 1 too low, igher number 1 too high? (i.e. bounds included not excluded)
+#TODO doesn't calculate maxspan from actual ends of read, but from 0
+#TODO during deletions, seems to misplace ticks (e.g. C2713- -> This also wrongly causes a nucleotide to be put instead of . at that place, causes "WARNING Something went wrong ....")
+#TODO 2nd layer annotation at start of longer annotation seems to enable mixup of the two and caues amino acid duplication in sequence?
+#TODO results folder isn't cleared before run
 import argparse
 import csv
 import datetime
@@ -42,7 +46,9 @@ def master():
         print("Processing task %s %s %s" % (task["gene"], task["clone"], task["plasmid"]))
 
         # Defining gene of interest based on genbank and region or sequence field.
-        task["goi"], task["start"], task["record"] = define_goi(task)
+        task["goi"], task["start"], task["record"], task["strand"] = define_goi(task)
+        if task["strand"] == -1:
+            print("\t\tWARNING: GENE ON COMPLEMENTARY STRAND. CAN'T CURRENTLY HANDLE REVERSE ORIENTATION, OUTPUT WILL BE MOSTLY NONSENSICAL")
         if not task["goi"]:
             print("Task skipped. No output generated.\n")
             continue
@@ -53,7 +59,9 @@ def master():
         # define the sequence traces belonging to gb file
         ab1_list = []
         for key in task:
-            if "sequencing" in key:  # sequencing1, sequencing2,... #TODO throws error for empty column
+            if key is None: #Bugfix - otherwise throws error for empty column
+                continue
+            if "sequencing" in key:  # sequencing1, sequencing2,... 
                 if task[key] is not "":
                     split = task[key].split(";")  # sequencing filename1;filename2 also works
                     for filename in split:
@@ -134,7 +142,7 @@ def master():
 
 def define_task(taskfile):
     task_list = []
-    with open(taskfile, "r") as csvfile:
+    with open(taskfile, "r", encoding = "utf-8-sig") as csvfile:
         task_reader = csv.DictReader(csvfile, delimiter="\t")
         # https://stackoverflow.com/questions/15865750/dictreader-change-keys-to-upper
         for row in task_reader:
@@ -149,42 +157,48 @@ def define_goi(task):  # not bothering with -1 strand
             record = SeqIO.read(task["genbank_path"], "genbank")
             if not task["region"] is "":  # define sequence from region
                 start, end = int(task["region"].split(":")[0]) - 1, int(task["region"].split(":")[1])
-                if args.verbose:
-                    print("\tDefining region as provided: Start {} end {}".format(start + 1, end))
-                return (record.seq[start:end], start, record)
+                if end >= start:
+                    orientation = 1
+                    if args.verbose:
+                        print("\tDefining region as provided: Start {} end {}".format(start + 1, end))
+                    else:
+                        orientation = -1
+                        start, end = end - 1, start + 1
+                        if args.verbose:
+                            print("\tWARNING: EXPERIMENTAL - Defining region inverted from provided: End {} start {}".format(start,end+1)) # TODO validate
+                return (record.seq[start:end], start, record, orientation)
             if not task["sequence"] == "":  # define region from sequence
                 goi = Seq(task["sequence"].upper())
-                start = int(str(record.seq.find(str(goi).upper())))
+                start = int(str(record.seq.find(str(goi).upper()))) #TODO what happens if reverse complement provided?
                 if start == -1:
                     raise Exception("Sequence provided but not found in genbank.")
                 if args.verbose:
                     print("\tDefining region by sequence found in genbank: Start {} end {}".format(start + 1,
                                                                                                    len(goi) + start))
-                return (goi, start, record)
+                return (goi, start, record, 1)
             for feature in record.features:
-                if "GOI" in feature.qualifiers["label"]:
+                if "GOI" in feature.qualifiers["label"]: #sg note, benchling label
                     start, end = int(feature.location.start), int(
                         feature.location.end)  # location.start is already adjusted to index, -1
                     if args.verbose:
                         print("\tDefining region by GOI label in genbank: Start {} end {}".format(start + 1, end))
-                    return (record.seq[start:end], start, record)
+                    return (record.seq[start:end], start, record, feature.strand)
             else:
                 print("WARNING gene not defined by region/sequence/annotation. Default to entire genbank region")
-                return (record.seq, 0, record)
+                return (record.seq, 0, record, 1)
         except FileNotFoundError:
             if not task["sequence"] is "":
                 print("WARNING %s not found! DEFAULT to sequence provided" % task["genbank_path"])
-                return (Seq(task["sequence"]), 0, False)
+                return (Seq(task["sequence"]), 0, False, 1)
             else:
                 # TODO if permissive: return False
                 raise FileNotFoundError(task["genbank_path"] + " not found!")
     elif task["sequence"]:
         print("\tWARNING no genbank provided. DEFAULT to sequence provided")
-        return (Seq(task["sequence"]), 0, False)
+        return (Seq(task["sequence"]), 0, False, 1)
     else:
         print("\tWARNING task provided with neither genbank file nor sequence information. Skipping task...")
-        return (False, 0, False)
-
+        return (False, None, None, None)
 
 """alternative to nblast in construction. Might be easier to just use pairwise2
 from Bio.Blast import NCBIWWW
@@ -821,7 +835,7 @@ def html_love(html_dict, alignment_list):
     html_dict["ANNOTATION"] = annotation_buffer
 
     with open(template_path, "r") as fh:
-        with open(result_path, "w+") as rh:
+        with open(result_path, "w+", encoding = "utf-8-sig") as rh:
             for line in fh:
                 line = line.format(**html_dict)
                 rh.write(line)
