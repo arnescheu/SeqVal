@@ -1,3 +1,6 @@
+This is a little tool used to generate a report documenting sequence validations after plasmid sequencing. 
+Made during my DPhil to assist and speed up this validation/archiving process.
+
 Requires:
 -python
 -long form instructions see instructions.txt
